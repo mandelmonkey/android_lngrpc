@@ -1,6 +1,6 @@
  import android.os.Handler;
  import android.os.Looper;
-import com.google.protobuf.ByteString;
+ import com.google.protobuf.ByteString;
  import io.grpc.Attributes;
  import io.grpc.CallCredentials;
  import io.grpc.ManagedChannel;
@@ -19,15 +19,11 @@ import com.google.protobuf.ByteString;
  import javax.net.ssl.TrustManagerFactory;
  import javax.net.ssl.SSLContext;
  import javax.net.ssl.SSLSocketFactory;
-
  import io.grpc.okhttp.OkHttpChannelBuilder;
-
  import com.squareup.okhttp.ConnectionSpec;
  import com.squareup.okhttp.TlsVersion;
-
  import io.grpc.internal.GrpcUtil;
  import io.grpc.okhttp.internal.CipherSuite;
-
  import io.grpc.okhttp.NegotiationType;
  import io.grpc.okhttp.OkHttpChannelBuilder;
  import lnrpc.LightningGrpc;
@@ -44,18 +40,15 @@ import com.google.protobuf.ByteString;
  import java.util.Iterator;
  import java.util.concurrent.Executor;
  import lnrpc.Rpc.NewAddressRequest.AddressType;
-
  import lnrpc.Rpc.PendingChannelsResponse.ClosedChannel;
  import lnrpc.Rpc.PendingChannelsResponse.ForceClosedChannel;
  import lnrpc.Rpc.PendingChannelsResponse.PendingChannel;
  import lnrpc.Rpc.PendingChannelsResponse.PendingOpenChannel;
  import lnrpc.Rpc.PendingChannelsResponse.WaitingCloseChannel;
+ import org.apache.commons.codec.binary.Base64;
+ import org.apache.commons.codec.binary.Hex;
  import org.json.JSONObject;
  import org.json.JSONArray;
-
- //import java.lang.Object.android.os.Handler;
-
-
 
  public class Lngrpc {
 
@@ -106,14 +99,17 @@ import com.google.protobuf.ByteString;
    return data;
   }
   private static X509Certificate convertToX509Cert(String certificateString) throws CertificateException {
+
    X509Certificate certificate = null;
    CertificateFactory cf = null;
    try {
     if (certificateString != null && !certificateString.trim().isEmpty()) {
 
      byte[] certificateData = hexStringToByteArray(certificateString);
+
      cf = CertificateFactory.getInstance("X509");
      certificate = (X509Certificate) cf.generateCertificate(new ByteArrayInputStream(certificateData));
+
     }
    } catch (CertificateException e) {
     throw new CertificateException(e);
@@ -122,9 +118,11 @@ import com.google.protobuf.ByteString;
   }
 
   private static SSLSocketFactory newSslSocketFactoryForCa(String certificateString) throws Exception {
+
    KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
    ks.load(null, null);
    CertificateFactory cf = CertificateFactory.getInstance("X.509");
+
    X509Certificate cert = convertToX509Cert(certificateString);
 
    X500Principal principal = cert.getSubjectX500Principal();
@@ -146,6 +144,7 @@ import com.google.protobuf.ByteString;
   private static LightningBlockingStub stub;
 
 
+
   public static void Connect(final String host, final int port, final String cert, final String macaroon, final CallbackInterface callback) throws IOException {
    Thread thread = new Thread(new Runnable() {
     @Override
@@ -153,25 +152,25 @@ import com.google.protobuf.ByteString;
 
 
      try {
-
       OkHttpChannelBuilder builder = OkHttpChannelBuilder.forAddress(host, port)
        .connectionSpec(new ConnectionSpec.Builder(OkHttpChannelBuilder.DEFAULT_CONNECTION_SPEC)
         .tlsVersions(ConnectionSpec.MODERN_TLS.tlsVersions().toArray(new TlsVersion[0]))
         .build());
 
 
+
       if (cert != null) {
+       byte[] decoded = Base64.decodeBase64(cert);
+       String hexString = Hex.encodeHexString(decoded);
+
        try {
-
-        builder.sslSocketFactory(newSslSocketFactoryForCa(cert));
+        builder.sslSocketFactory(newSslSocketFactoryForCa(hexString));
        } catch (Exception e) {
-
+        System.out.println(e);
         throw new RuntimeException(e);
        }
       }
       ManagedChannel channel = builder.build();
-
-
 
 
       stub = LightningGrpc
@@ -199,7 +198,7 @@ import com.google.protobuf.ByteString;
       }
      }
 
-    } // This is your code
+    }
    });
    thread.start();
 
@@ -213,14 +212,29 @@ import com.google.protobuf.ByteString;
 
      try {
 
-
-
       GetInfoResponse response = stub.getInfo(GetInfoRequest.getDefaultInstance());
-
 
       JSONObject resJson = new JSONObject();
       resJson.put("identity_pubkey", response.getIdentityPubkey());
       resJson.put("num_active_channels", response.getNumActiveChannels());
+      resJson.put("alias", response.getAlias());
+      resJson.put("testnet", response.getTestnet());
+
+
+      try {
+
+       int urisCount = response.getUrisCount();
+       JSONArray urisArray = new JSONArray();
+
+       for (int i2 = 0; i2 < urisCount; i2++) {
+
+        urisArray.put(response.getUris(i2));
+       }
+
+       resJson.put("uris", urisArray);
+      } catch (Exception e) {
+
+      }
 
 
       JSONObject json = new JSONObject();
@@ -240,7 +254,7 @@ import com.google.protobuf.ByteString;
       }
      }
 
-    } // This is your code
+    }
    });
    thread.start();
 
@@ -276,7 +290,7 @@ import com.google.protobuf.ByteString;
       }
      }
 
-    } // This is your code
+    }
    });
    thread.start();
 
@@ -313,7 +327,72 @@ import com.google.protobuf.ByteString;
       }
      }
 
-    } // This is your code
+    }
+   });
+   thread.start();
+
+  }
+
+
+  public static void GetTransactions(final CallbackInterface callback) throws IOException {
+
+
+   Thread thread = new Thread(new Runnable() {
+    @Override
+    public void run() {
+
+     try {
+      TransactionDetails response = stub.getTransactions(GetTransactionsRequest.getDefaultInstance());
+
+      JSONArray resJson = new JSONArray();
+
+      List < Transaction > transactions = response.getTransactionsList();
+
+      for (int i = 0; i < transactions.size(); i++) {
+       Transaction aTransaction = transactions.get(i);
+
+       JSONObject aTransactionJSON = new JSONObject();
+       aTransactionJSON.put("amount", aTransaction.getAmount());
+       aTransactionJSON.put("tx_hash", aTransaction.getTxHash());
+       aTransactionJSON.put("time_stamp", aTransaction.getTimeStamp());
+       aTransactionJSON.put("num_confirmations", aTransaction.getNumConfirmations());
+
+       try {
+
+        int addressCount = aTransaction.getDestAddressesCount();
+        JSONArray addressArray = new JSONArray();
+
+        for (int i2 = 0; i2 < addressCount; i2++) {
+
+         addressArray.put(aTransaction.getDestAddresses(i2));
+        }
+
+        aTransactionJSON.put("dest_addresses", addressArray);
+       } catch (Exception e) {
+
+       }
+
+       resJson.put(aTransactionJSON);
+
+      }
+
+      JSONObject json = new JSONObject();
+      json.put("error", false);
+      json.put("response", resJson);
+
+      callback.eventFired(json.toString());
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+
+      }
+     }
+    }
    });
    thread.start();
 
@@ -339,11 +418,26 @@ import com.google.protobuf.ByteString;
        aPaymentJSON.put("creation_date", aPayment.getCreationDate());
        aPaymentJSON.put("payment_preimage", aPayment.getPaymentPreimage());
        aPaymentJSON.put("value_sat", aPayment.getValueSat());
+
+       try {
+
+        int pathCount = aPayment.getPathCount();
+        JSONArray pathArray = new JSONArray();
+
+        for (int i2 = 0; i2 < pathCount; i2++) {
+
+         pathArray.put(aPayment.getPath(i2));
+        }
+
+        aPaymentJSON.put("path", pathArray);
+       } catch (Exception e) {
+
+       }
+
        resJson.put(aPaymentJSON);
 
       }
 
-      //System.out.println(resJson);
       JSONObject json = new JSONObject();
       json.put("error", false);
       json.put("response", resJson);
@@ -361,7 +455,7 @@ import com.google.protobuf.ByteString;
       }
      }
 
-    } // This is your code
+    }
    });
    thread.start();
 
@@ -372,8 +466,13 @@ import com.google.protobuf.ByteString;
     public void run() {
 
      try {
+      ListInvoiceRequest.Builder request = ListInvoiceRequest.newBuilder();
 
-      ListInvoiceResponse response = stub.listInvoices(ListInvoiceRequest.getDefaultInstance());
+      request.setReversed(true);
+
+
+
+      ListInvoiceResponse response = stub.listInvoices(request.build());
 
       JSONArray resJson = new JSONArray();
 
@@ -383,14 +482,17 @@ import com.google.protobuf.ByteString;
        Invoice anInvoice = invoices.get(i);
        JSONObject anInvoiceJSON = new JSONObject();
        anInvoiceJSON.put("creation_date", anInvoice.getCreationDate());
-       anInvoiceJSON.put("memo", anInvoice.getMemo()); //deprecated check api lnd
+       anInvoiceJSON.put("memo", anInvoice.getMemo());
        anInvoiceJSON.put("amt_paid", anInvoice.getAmtPaid()); //deprecated check api lnd
+       anInvoiceJSON.put("value", anInvoice.getValue()); //deprecated check api lnd
+       anInvoiceJSON.put("payment_request", anInvoice.getPaymentRequest());
+       anInvoiceJSON.put("settled", anInvoice.getSettled());
+       anInvoiceJSON.put("r_hash", bytesToHex(anInvoice.getRHash().toByteArray()));
 
        resJson.put(anInvoiceJSON);
 
       }
 
-      //System.out.println(resJson);
       JSONObject json = new JSONObject();
       json.put("error", false);
       json.put("response", resJson);
@@ -407,7 +509,7 @@ import com.google.protobuf.ByteString;
        callback.eventFired("");
       }
      }
-    } // This is your code
+    }
    });
    thread.start();
 
@@ -460,7 +562,7 @@ import com.google.protobuf.ByteString;
 
       }
      }
-    } // This is your code
+    }
    });
    thread.start();
 
@@ -471,11 +573,6 @@ import com.google.protobuf.ByteString;
    try {
     JSONObject pendingChannelJSON = new JSONObject();
 
-    /*remote_node_pub	string	
-channel_point	string	
-capacity	int64	
-local_balance	int64	
-remote_balance	*/
     pendingChannelJSON.put("remote_node_pub", pendingChannel.getRemoteNodePub());
     pendingChannelJSON.put("channel_point", pendingChannel.getChannelPoint());
     pendingChannelJSON.put("capacity", pendingChannel.getCapacity());
@@ -518,11 +615,6 @@ remote_balance	*/
       }
 
       resJSON.put("pending_open_channels", pendingOpenChannelsArray);
-
-
-
-
-
 
 
       JSONArray pendingClosingChannelsArray = new JSONArray();
@@ -591,7 +683,6 @@ remote_balance	*/
       JSONObject json = new JSONObject();
       json.put("error", false);
       json.put("response", resJSON);
-      //json.put("verbose",response.toString());
 
       callback.eventFired(json.toString());
      } catch (Exception e) {
@@ -606,7 +697,7 @@ remote_balance	*/
       }
      }
 
-    } // This is your code
+    }
    });
    thread.start();
 
@@ -651,7 +742,7 @@ remote_balance	*/
       }
      }
 
-    } // This is your code
+    }
    });
    thread.start();
 
@@ -697,7 +788,7 @@ remote_balance	*/
       }
      }
 
-    } // This is your code
+    }
    });
    thread.start();
 
@@ -705,21 +796,23 @@ remote_balance	*/
   }
 
 
-  public static void SendPayment(final String pay_req, final CallbackInterface callback) throws IOException {
+  public static void SendPayment(final String pay_req, final long amount, final CallbackInterface callback) throws IOException {
    Thread thread = new Thread(new Runnable() {
     @Override
     public void run() {
 
      try {
-      SendRequest sendReq = SendRequest.newBuilder().setPaymentRequest(pay_req).build();
 
-      SendResponse response = stub.sendPaymentSync(sendReq);
+      SendRequest.Builder sendReqBuilder = SendRequest.newBuilder();
 
-      /*
-                payment_error	string	
-payment_preimage	bytes	
-payment_route	Route	
-                */
+      sendReqBuilder.setPaymentRequest(pay_req);
+
+      if (amount != -1) {
+       sendReqBuilder.setAmt(amount);
+      }
+
+      SendResponse response = stub.sendPaymentSync(sendReqBuilder.build());
+
       JSONObject resJson = new JSONObject();
       resJson.put("payment_error", response.getPaymentError());
       resJson.put("payment_preimage", bytesToHex(response.getPaymentPreimage().toByteArray()));
@@ -743,7 +836,7 @@ payment_route	Route
       }
      }
 
-    } // This is your code
+    }
    });
    thread.start();
 
@@ -784,7 +877,7 @@ payment_route	Route
       }
      }
 
-    } // This is your code
+    }
    });
    thread.start();
 
@@ -821,26 +914,28 @@ payment_route	Route
       }
      }
 
-    } // This is your code
+    }
    });
    thread.start();
 
 
   }
-  
-  public static void AddInvoice(final long amout, final String memo, final CallbackInterface callback) throws IOException {
+
+  public static void AddInvoice(final long amount, final long expiry, final String memo, final CallbackInterface callback) throws IOException {
    Thread thread = new Thread(new Runnable() {
     @Override
     public void run() {
-          try {
-        Invoice.Builder invoiceReq = Invoice.newBuilder();
-      invoiceReq.setValue(amout);
-      if(memo != null){
-          invoiceReq.setMemo(memo);
+     try {
+      Invoice.Builder invoiceReq = Invoice.newBuilder();
+      invoiceReq.setValue(amount);
+      if (memo != null) {
+       invoiceReq.setMemo(memo);
       }
-      
+
+      invoiceReq.setExpiry(expiry);
+
       AddInvoiceResponse response = stub.addInvoice(invoiceReq.build());
-       
+
       JSONObject resJson = new JSONObject();
       resJson.put("payment_request", response.getPaymentRequest());
 
@@ -849,105 +944,7 @@ payment_route	Route
       json.put("response", resJson);
 
       callback.eventFired(json.toString());
-      
-      } catch (Exception e) {
-      try {
-       JSONObject json = new JSONObject();
-       json.put("error", true);
-       json.put("response", e.toString());
 
-       callback.eventFired(json.toString());
-      } catch (Exception e2) {
-       callback.eventFired("");
-      }
-     }
-     
-   } // This is your code
-   });
-   thread.start();
-
-  }
-  
-  public static void OpenChannel(final String pubKey, final long local_amount, final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
-    @Override
-    public void run() {
-
-     try {
-System.out.println("pubKey " + pubKey);
-
-      OpenChannelRequest.Builder openChannelReq = OpenChannelRequest.newBuilder();
-      openChannelReq.setNodePubkeyString(pubKey);
-   
-       openChannelReq.setNodePubkey( ByteString.copyFrom(hexStringToByteArray(pubKey)));
-      openChannelReq.setLocalFundingAmount(local_amount);
-
-       
-     // ChannelPoint response = stub.openChannel(openChannelReq.build());
-      
-      
-      
-      Iterator < OpenStatusUpdate > iterator = stub.openChannel(openChannelReq.build());
-      while (iterator.hasNext()) {
-       OpenStatusUpdate openStatusUpdate = iterator.next();
-       System.out.println("logged " + openStatusUpdate.toString());
-
-      ChannelOpenUpdate channelOpenUpdate = openStatusUpdate.getChanOpen();
-      PendingUpdate pendingUpdate = openStatusUpdate.getChanPending();
-      ConfirmationUpdate confirmationUpdate = openStatusUpdate.getConfirmation();
-       
-      
-      
-      ChannelPoint channelPoint = channelOpenUpdate.getChannelPoint();
-      
-      JSONObject channelPointJson = new JSONObject();
-      channelPointJson.put("funding_txid", channelPoint.getFundingTxidStr());
-       channelPointJson.put("output_index", channelPoint.getOutputIndex());
-      
-      JSONObject channelOpenUpdateJson = new JSONObject(); 
-      channelOpenUpdateJson.put("channel_point", channelPointJson);
-      
-       JSONObject pendingUpdateJson = new JSONObject();
-       pendingUpdateJson.put("txid",bytesToHex(pendingUpdate.getTxid().toByteArray())); 
-       pendingUpdateJson.put("output_index",pendingUpdate.getOutputIndex());
-       
-        JSONObject confirmationUpdateJson = new JSONObject();
-       confirmationUpdateJson.put("block_height",confirmationUpdate.getBlockHeight());
-       
-       confirmationUpdateJson.put("num_confs_left",confirmationUpdate.getNumConfsLeft());
-       
-        confirmationUpdateJson.put("block_sha",bytesToHex(confirmationUpdate.getBlockSha().toByteArray()));
-       
-        
-        
-          
-      JSONObject jsonCombined = new JSONObject(); 
-       jsonCombined.put("channel_open_update", channelOpenUpdateJson);
-        jsonCombined.put("pending_update", pendingUpdateJson);
-        jsonCombined.put("confirmation_update",  confirmationUpdateJson);
-
-       
-     JSONObject json = new JSONObject();
-       json.put("error", false);
-       json.put("response", jsonCombined);
-
-
-       callback.eventFired(json.toString()); 
-
-      }
-
-
-       /*
-      JSONObject resJson = new JSONObject();
-      resJson.put("funding_txid_str", response.getFundingTxidStr());
-      resJson.put("output_index", response.getOutputIndex());
-      resJson.put("verbose", response.toString());
-
-      JSONObject json = new JSONObject();
-      json.put("error", false);
-      json.put("response", resJson);
-
-      callback.eventFired(json.toString());*/
      } catch (Exception e) {
       try {
        JSONObject json = new JSONObject();
@@ -960,15 +957,230 @@ System.out.println("pubKey " + pubKey);
       }
      }
 
-    } // This is your code
+    }
+   });
+   thread.start();
+
+  }
+
+  public static void OpenChannel(final String pubKey, final long local_amount, final CallbackInterface callback) throws IOException {
+   Thread thread = new Thread(new Runnable() {
+    @Override
+    public void run() {
+
+     try {
+      System.out.println("pubKey " + pubKey);
+
+      OpenChannelRequest.Builder openChannelReq = OpenChannelRequest.newBuilder();
+      openChannelReq.setNodePubkeyString(pubKey);
+
+      openChannelReq.setNodePubkey(ByteString.copyFrom(hexStringToByteArray(pubKey)));
+      openChannelReq.setLocalFundingAmount(local_amount);
+
+      Iterator < OpenStatusUpdate > iterator = stub.openChannel(openChannelReq.build());
+      while (iterator.hasNext()) {
+       OpenStatusUpdate openStatusUpdate = iterator.next();
+       System.out.println("logged " + openStatusUpdate.toString());
+
+       ChannelOpenUpdate channelOpenUpdate = openStatusUpdate.getChanOpen();
+       PendingUpdate pendingUpdate = openStatusUpdate.getChanPending();
+       ConfirmationUpdate confirmationUpdate = openStatusUpdate.getConfirmation();
+
+
+
+       ChannelPoint channelPoint = channelOpenUpdate.getChannelPoint();
+
+       JSONObject channelPointJson = new JSONObject();
+       channelPointJson.put("funding_txid", channelPoint.getFundingTxidStr());
+       channelPointJson.put("output_index", channelPoint.getOutputIndex());
+
+       JSONObject channelOpenUpdateJson = new JSONObject();
+       channelOpenUpdateJson.put("channel_point", channelPointJson);
+
+       JSONObject pendingUpdateJson = new JSONObject();
+       pendingUpdateJson.put("txid", bytesToHex(pendingUpdate.getTxid().toByteArray()));
+       pendingUpdateJson.put("output_index", pendingUpdate.getOutputIndex());
+
+       JSONObject confirmationUpdateJson = new JSONObject();
+       confirmationUpdateJson.put("block_height", confirmationUpdate.getBlockHeight());
+
+       confirmationUpdateJson.put("num_confs_left", confirmationUpdate.getNumConfsLeft());
+
+       confirmationUpdateJson.put("block_sha", bytesToHex(confirmationUpdate.getBlockSha().toByteArray()));
+
+
+
+
+       JSONObject jsonCombined = new JSONObject();
+       jsonCombined.put("channel_open_update", channelOpenUpdateJson);
+       jsonCombined.put("pending_update", pendingUpdateJson);
+       jsonCombined.put("confirmation_update", confirmationUpdateJson);
+
+
+       JSONObject json = new JSONObject();
+       json.put("error", false);
+       json.put("response", jsonCombined);
+
+
+       callback.eventFired(json.toString());
+
+      }
+
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+       callback.eventFired("");
+      }
+     }
+
+    }
    });
    thread.start();
 
 
   }
 
-  
-   
+
+  public static void GetNodeInfo(final String pubkey, final CallbackInterface callback) throws IOException {
+   Thread thread = new Thread(new Runnable() {
+    @Override
+    public void run() {
+
+     try {
+
+      System.out.println("start get node info");
+      NodeInfoRequest.Builder req = NodeInfoRequest.newBuilder();
+      req.setPubKey(pubkey);
+
+      NodeInfo nodeInfo = stub.getNodeInfo(req.build());
+
+
+      System.out.println("got node info");
+
+
+      JSONObject nodeInfoJson = new JSONObject();
+      nodeInfoJson.put("alias", nodeInfo.getNode().getAlias());
+
+
+      JSONObject nodeJson = new JSONObject();
+      nodeJson.put("node", nodeInfoJson);
+
+      JSONObject json = new JSONObject();
+      json.put("error", false);
+      json.put("response", nodeJson);
+
+
+      callback.eventFired(json.toString());
+
+
+
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+       callback.eventFired("");
+      }
+     }
+
+    }
+   });
+   thread.start();
+
+
+  }
+
+
+
+  public static void CloseChannel(final String txid, final int output, final boolean force, final CallbackInterface callback) throws IOException {
+   Thread thread = new Thread(new Runnable() {
+    @Override
+    public void run() {
+
+     try {
+
+      System.out.println("start close channel");
+      CloseChannelRequest.Builder req = CloseChannelRequest.newBuilder();
+
+      ChannelPoint.Builder cp = ChannelPoint.newBuilder();
+      cp.setFundingTxidStr(txid);
+      cp.setOutputIndex(output);
+      req.setChannelPoint(cp.build());
+      req.setForce(force);
+      Iterator < CloseStatusUpdate > iterator = stub.closeChannel(req.build());
+
+
+      System.out.println("getting close channel");
+      while (iterator.hasNext()) {
+
+       System.out.println("got close channel");
+
+       CloseStatusUpdate closeStatusUpdate = iterator.next();
+
+
+       ChannelCloseUpdate channelCloseUpdate = closeStatusUpdate.getChanClose();
+       PendingUpdate pendingUpdate = closeStatusUpdate.getClosePending();
+       ConfirmationUpdate confirmationUpdate = closeStatusUpdate.getConfirmation();
+
+       JSONObject chanCloseJSON = new JSONObject();
+       chanCloseJSON.put("closing_txid", bytesToHex(channelCloseUpdate.getClosingTxid().toByteArray()));
+       chanCloseJSON.put("success", channelCloseUpdate.getSuccess());
+
+       JSONObject pendingUpdateJson = new JSONObject();
+       pendingUpdateJson.put("txid", bytesToHex(pendingUpdate.getTxid().toByteArray()));
+       pendingUpdateJson.put("output_index", pendingUpdate.getOutputIndex());
+
+       JSONObject confirmationUpdateJson = new JSONObject();
+       confirmationUpdateJson.put("block_height", confirmationUpdate.getBlockHeight());
+       confirmationUpdateJson.put("num_confs_left", confirmationUpdate.getNumConfsLeft());
+       confirmationUpdateJson.put("block_sha", bytesToHex(confirmationUpdate.getBlockSha().toByteArray()));
+
+
+
+
+       JSONObject jsonCombined = new JSONObject();
+       jsonCombined.put("chan_close", chanCloseJSON);
+       jsonCombined.put("pending_update", pendingUpdateJson);
+       jsonCombined.put("confirmation_update", confirmationUpdateJson);
+
+
+       JSONObject json = new JSONObject();
+       json.put("error", false);
+       json.put("response", jsonCombined);
+
+
+       callback.eventFired(json.toString());
+
+      }
+
+
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+       callback.eventFired("");
+      }
+     }
+
+    }
+   });
+   thread.start();
+
+
+  }
+
 
   public static void SubscribeInvoices(final CallbackInterface callback) throws IOException {
 
@@ -977,24 +1189,29 @@ System.out.println("pubKey " + pubKey);
     public void run() {
 
      try {
-       InvoiceSubscription request =  InvoiceSubscription.getDefaultInstance();
-               
-      Iterator < Invoice > iterator =  stub.subscribeInvoices(request);
+      InvoiceSubscription request = InvoiceSubscription.getDefaultInstance();
+
+      Iterator < Invoice > iterator = stub.subscribeInvoices(request);
       while (iterator.hasNext()) {
-      Invoice anInvoice = iterator.next();
-      
-      JSONObject anInvoiceJSON = new JSONObject();
+       Invoice anInvoice = iterator.next();
+
+       JSONObject anInvoiceJSON = new JSONObject();
        anInvoiceJSON.put("creation_date", anInvoice.getCreationDate());
        anInvoiceJSON.put("memo", anInvoice.getMemo()); //deprecated check api lnd
        anInvoiceJSON.put("amt_paid", anInvoice.getAmtPaid()); //deprecated check api lnd
-        anInvoiceJSON.put("payment_request", anInvoice.getPaymentRequest()); 
-         anInvoiceJSON.put("settled", anInvoice.getSettled()); 
-          anInvoiceJSON.put("r_hash", bytesToHex(anInvoice.getRHash().toByteArray()));
+       anInvoiceJSON.put("payment_request", anInvoice.getPaymentRequest());
+       anInvoiceJSON.put("settled", anInvoice.getSettled());
+       anInvoiceJSON.put("r_hash", bytesToHex(anInvoice.getRHash().toByteArray()));
+       anInvoiceJSON.put("value", anInvoice.getValue());
 
- callback.eventFired(anInvoiceJSON.toString()); 
+
+       JSONObject json = new JSONObject();
+       json.put("error", false);
+       json.put("response", anInvoiceJSON);
+       callback.eventFired(json.toString());
       }
 
- 
+
      } catch (Exception e) {
       try {
        JSONObject json = new JSONObject();
@@ -1003,17 +1220,17 @@ System.out.println("pubKey " + pubKey);
 
        System.out.println("error " + e.toString());
 
-        callback.eventFired(json.toString());
+       callback.eventFired(json.toString());
       } catch (Exception e2) {
-      
- callback.eventFired(e2.toString()); 
+
+       callback.eventFired(e2.toString());
       }
      }
 
-    } // This is your code
+    }
    });
    thread.start();
- 
+
   }
 
   private static String bytesToHex(byte[] bytes) {
