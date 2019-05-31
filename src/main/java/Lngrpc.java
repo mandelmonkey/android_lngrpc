@@ -28,11 +28,14 @@
  import io.grpc.okhttp.NegotiationType;
  import io.grpc.okhttp.OkHttpChannelBuilder;
  import lnrpc.LightningGrpc;
- import lnrpc.LightningGrpc.LightningBlockingStub;
+ import lnrpc.LightningGrpc.LightningStub;
+ import io.grpc.stub.StreamObserver;
  import lnrpc.Rpc.GetInfoRequest;
  import lnrpc.Rpc.GetInfoResponse;
  import lnrpc.Rpc.*;
  import lnrpc.Rpc.*;
+ import invoicesrpc.InvoicesGrpc;
+ import invoicesrpc.InvoicesGrpc.InvoicesStub;
  import invoicesrpc.InvoicesOuterClass.*;
  import java.util.List;
  import java.io.File;
@@ -144,7 +147,9 @@
 
   }
 
-  private static LightningBlockingStub stub;
+  private static LightningStub stub;
+
+  private static InvoicesStub stubInvoices;
 
 
 
@@ -175,10 +180,14 @@
       }
       ManagedChannel channel = builder.build();
 
-
       stub = LightningGrpc
-       .newBlockingStub(channel)
+       .newStub(channel)
        .withCallCredentials(new MacaroonCallCredential(macaroon));
+
+      stubInvoices = InvoicesGrpc
+       .newStub(channel)
+       .withCallCredentials(new MacaroonCallCredential(macaroon));
+
       try {
        JSONObject json = new JSONObject();
        json.put("error", false);
@@ -209,21 +218,55 @@
 
 
 
-   
+
   public static void GetInfo(final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
+
+   stub.getInfo(GetInfoRequest.getDefaultInstance(), new StreamObserver < GetInfoResponse > () {
     @Override
-    public void run() {
+    public void onNext(GetInfoResponse response) {
+     JSONObject resJson = parseGetInfo(response);
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", false);
+      json.put("response", resJson);
+
+      callback.eventFired(json.toString());
+     } catch (Exception e) {
+
+     }
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e) {
+
+     }
+
+     // ...
+    }
+    @Override
+    public void onCompleted() {
+
+    }
+   });
+
+  }
+
+  public static void ExportAllChannelBackups(final CallbackInterface callback) throws IOException {
 
 
-
+   stub.exportAllChannelBackups(ChanBackupExportRequest.getDefaultInstance(), new StreamObserver < ChanBackupSnapshot > () {
+    @Override
+    public void onNext(ChanBackupSnapshot response) {
      try {
 
-      GetInfoResponse response = stub.getInfo(GetInfoRequest.getDefaultInstance());
-
-
-      JSONObject resJson = parseGetInfo(response);
-
+      JSONObject resJson = new JSONObject();
+      resJson.put("multi_chan_backup", bytesToHex(response.getMultiChanBackup().getMultiChanBackup().toByteArray()));
       JSONObject json = new JSONObject();
       json.put("error", false);
       json.put("response", resJson);
@@ -240,45 +283,24 @@
        callback.eventFired("");
       }
      }
-
     }
-   });
-   thread.start();
-
-  }
-  
-  public static void ExportAllChannelBackups(final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
     @Override
-    public void run() {
-
-     try { 
-         
-      ChanBackupSnapshot response = stub.exportAllChannelBackups(ChanBackupExportRequest.getDefaultInstance());
-
-      JSONObject resJson = new JSONObject();
-    resJson.put("multi_chan_backup", bytesToHex(response.getMultiChanBackup().getMultiChanBackup().toByteArray()));
-    JSONObject json = new JSONObject();
-    json.put("error", false);
-    json.put("response", resJson);
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.toString());
 
       callback.eventFired(json.toString());
-     } catch (Exception e) {
-      try {
-       JSONObject json = new JSONObject();
-       json.put("error", true);
-       json.put("response", e.toString());
-
-       callback.eventFired(json.toString());
-      } catch (Exception e2) {
-       callback.eventFired("");
-      }
+     } catch (Exception e2) {
+      callback.eventFired("");
      }
+    }
+    @Override
+    public void onCompleted() {
 
     }
    });
-   thread.start();
-
   }
 
 
@@ -416,6 +438,32 @@
   }
 
 
+  private static JSONObject parseChannelGraph(ChannelGraph response) {
+   try {
+    JSONObject resJson = new JSONObject();
+
+
+    try {
+
+     int nodesCount = response.getNodesCount();
+     JSONArray nodesArray = new JSONArray();
+
+     for (int i2 = 0; i2 < nodesCount; i2++) {
+      JSONObject nodeObject = new JSONObject();
+      nodeObject.put("pub_key", response.getNodes(i2).getPubKey());
+
+      nodesArray.put(nodeObject);
+     }
+     resJson.put("nodes", nodesArray);
+    } catch (Exception e) {
+
+    }
+
+    return resJson;
+   } catch (Exception e) {
+    return new JSONObject();
+   }
+  }
 
 
   private static JSONObject parseGetInfo(GetInfoResponse response) {
@@ -450,14 +498,13 @@
    }
   }
 
-
   public static void GetWalletBalance(final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
-    @Override
-    public void run() {
-     try {
-      WalletBalanceResponse response = stub.walletBalance(WalletBalanceRequest.getDefaultInstance());
 
+   stub.walletBalance(WalletBalanceRequest.getDefaultInstance(), new StreamObserver < WalletBalanceResponse > () {
+    @Override
+    public void onNext(WalletBalanceResponse response) {
+
+     try {
       JSONObject resJson = new JSONObject();
       resJson.put("total_balance", response.getTotalBalance());
       resJson.put("confirmed_balance", response.getConfirmedBalance());
@@ -482,22 +529,35 @@
      }
 
     }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+     // ...
+    }
+    @Override
+    public void onCompleted() {
+
+    }
    });
-   thread.start();
 
   }
 
 
-
   public static void GetChannelBalance(final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
+
+   stub.channelBalance(ChannelBalanceRequest.getDefaultInstance(), new StreamObserver < ChannelBalanceResponse > () {
     @Override
-    public void run() {
+    public void onNext(ChannelBalanceResponse response) {
 
      try {
-      ChannelBalanceResponse response = stub.channelBalance(ChannelBalanceRequest.getDefaultInstance());
-
-
 
       JSONObject resJson = parseChannelBalance(response);
       JSONObject json = new JSONObject();
@@ -516,24 +576,36 @@
        callback.eventFired("");
       }
      }
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+     // ...
+    }
+    @Override
+    public void onCompleted() {
 
     }
    });
-   thread.start();
+
 
   }
 
 
   public static void GetTransactions(final CallbackInterface callback) throws IOException {
 
-
-   Thread thread = new Thread(new Runnable() {
+   stub.getTransactions(GetTransactionsRequest.getDefaultInstance(), new StreamObserver < TransactionDetails > () {
     @Override
-    public void run() {
-
+    public void onNext(TransactionDetails response) {
      try {
-      TransactionDetails response = stub.getTransactions(GetTransactionsRequest.getDefaultInstance());
-
       JSONArray resJson = parseGetTransactions(response);
 
 
@@ -554,23 +626,39 @@
 
       }
      }
+
+    }
+    @Override
+    public void onError(Throwable t) {
+
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+
+     }
+
+     // ...
+    }
+    @Override
+    public void onCompleted() {
+
     }
    });
-   thread.start();
 
   }
 
   public static void ListPayments(final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
+
+   stub.listPayments(ListPaymentsRequest.getDefaultInstance(), new StreamObserver < ListPaymentsResponse > () {
     @Override
-    public void run() {
+    public void onNext(ListPaymentsResponse response) {
 
      try {
-      ListPaymentsResponse response = stub.listPayments(ListPaymentsRequest.getDefaultInstance());
-
       JSONArray resJson = parseListPayments(response);
-
-
 
       JSONObject json = new JSONObject();
       json.put("error", false);
@@ -588,26 +676,36 @@
        callback.eventFired("");
       }
      }
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+    }
+    @Override
+    public void onCompleted() {
 
     }
    });
-   thread.start();
 
   }
   public static void ListInvoices(final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
+
+   ListInvoiceRequest.Builder request = ListInvoiceRequest.newBuilder();
+
+   request.setReversed(true);
+
+   stub.listInvoices(request.build(), new StreamObserver < ListInvoiceResponse > () {
     @Override
-    public void run() {
-
+    public void onNext(ListInvoiceResponse response) {
      try {
-      ListInvoiceRequest.Builder request = ListInvoiceRequest.newBuilder();
-
-      request.setReversed(true);
-
-
-
-      ListInvoiceResponse response = stub.listInvoices(request.build());
-
       JSONArray resJson = parseListInvoices(response);
 
       JSONObject json = new JSONObject();
@@ -627,20 +725,33 @@
       }
      }
     }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+    }
+    @Override
+    public void onCompleted() {
+
+    }
    });
-   thread.start();
+
 
   }
   public static void ListChannels(final CallbackInterface callback) throws IOException {
 
 
-   Thread thread = new Thread(new Runnable() {
+   stub.listChannels(ListChannelsRequest.getDefaultInstance(), new StreamObserver < ListChannelsResponse > () {
     @Override
-    public void run() {
-
+    public void onNext(ListChannelsResponse response) {
      try {
-      ListChannelsResponse response = stub.listChannels(ListChannelsRequest.getDefaultInstance());
-
       JSONArray resJson = parseListChannels(response);
 
 
@@ -661,157 +772,36 @@
       }
      }
     }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
+
+    }
    });
-   thread.start();
 
   }
 
-  private static JSONArray parseListChannels(ListChannelsResponse response) {
-   try {
-    JSONArray resJson = new JSONArray();
-
-    List < Channel > channels = response.getChannelsList();
-
-    for (int i = 0; i < channels.size(); i++) {
-     Channel aChannel = channels.get(i);
-
-     JSONObject aChannelJSON = new JSONObject();
-     aChannelJSON.put("active", aChannel.getActive());
-     aChannelJSON.put("remote_pubkey", aChannel.getRemotePubkey());
-     aChannelJSON.put("channel_point", aChannel.getChannelPoint());
-     aChannelJSON.put("chan_id", aChannel.getChanId());
-     aChannelJSON.put("capacity", aChannel.getCapacity());
-
-     aChannelJSON.put("local_balance", aChannel.getLocalBalance());
-     aChannelJSON.put("remote_balance", aChannel.getRemoteBalance());
-
-     resJson.put(aChannelJSON);
-
-    }
-    return resJson;
-   } catch (Exception e) {
-    return new JSONArray();
-   }
-  }
-
-  static JSONObject getPendingChannelJSON(PendingChannel pendingChannel) {
-
-   try {
-    JSONObject pendingChannelJSON = new JSONObject();
-
-    pendingChannelJSON.put("remote_node_pub", pendingChannel.getRemoteNodePub());
-    pendingChannelJSON.put("channel_point", pendingChannel.getChannelPoint());
-    pendingChannelJSON.put("capacity", pendingChannel.getCapacity());
-    pendingChannelJSON.put("local_balance", pendingChannel.getLocalBalance());
-    pendingChannelJSON.put("remote_balance", pendingChannel.getRemoteBalance());
-
-    return pendingChannelJSON;
-   } catch (Exception e) {
-
-    return null;
-   }
-  }
-
-  private static JSONObject parsePendingChannels(PendingChannelsResponse response) {
-   try {
-    JSONObject resJSON = new JSONObject();
-    resJSON.put("total_limbo_balance", response.getTotalLimboBalance());
-    JSONArray pendingOpenChannelsArray = new JSONArray();
-
-    List < PendingOpenChannel > pendingOpenChannels = response.getPendingOpenChannelsList();
-
-    for (int i = 0; i < pendingOpenChannels.size(); i++) {
-     PendingOpenChannel aPendingOpenChannels = pendingOpenChannels.get(i);
-     JSONObject aPendingOpenChannelJSON = new JSONObject();
-     aPendingOpenChannelJSON.put("channel", getPendingChannelJSON(aPendingOpenChannels.getChannel()));
-     aPendingOpenChannelJSON.put("confirmation_height", aPendingOpenChannels.getConfirmationHeight());
-     aPendingOpenChannelJSON.put("commit_fee", aPendingOpenChannels.getCommitFee());
-     aPendingOpenChannelJSON.put("commit_weight", aPendingOpenChannels.getCommitWeight());
-     aPendingOpenChannelJSON.put("fee_per_kw", aPendingOpenChannels.getFeePerKw());
-
-     pendingOpenChannelsArray.put(aPendingOpenChannelJSON);
-
-    }
-
-    resJSON.put("pending_open_channels", pendingOpenChannelsArray);
 
 
-    JSONArray pendingClosingChannelsArray = new JSONArray();
-
-    List < ClosedChannel > pendingClosingChannels = response.getPendingClosingChannelsList();
-
-    System.out.println("pending size");
-    System.out.println(pendingClosingChannels.size());
-    for (int i = 0; i < pendingClosingChannels.size(); i++) {
-
-     ClosedChannel aClosedChannel = pendingClosingChannels.get(i);
-     System.out.println(aClosedChannel.toString());
-     JSONObject aClosedChannelJSON = new JSONObject();
-     aClosedChannelJSON.put("channel", getPendingChannelJSON(aClosedChannel.getChannel()));
-     aClosedChannelJSON.put("closing_txid", aClosedChannel.getClosingTxid());
-     pendingClosingChannelsArray.put(aClosedChannelJSON);
-
-    }
-
-    resJSON.put("pending_closing_channels", pendingClosingChannelsArray);
-
-
-    JSONArray pendingForceClosingChannelsArray = new JSONArray();
-
-    List < ForceClosedChannel > pendingForceClosingChannels = response.getPendingForceClosingChannelsList();
-
-    for (int i = 0; i < pendingForceClosingChannels.size(); i++) {
-     ForceClosedChannel aForceClosedChannel = pendingForceClosingChannels.get(i);
-     JSONObject aForceClosedChannelJSON = new JSONObject();
-     aForceClosedChannelJSON.put("channel", getPendingChannelJSON(aForceClosedChannel.getChannel()));
-     aForceClosedChannelJSON.put("closing_txid", aForceClosedChannel.getClosingTxid());
-     aForceClosedChannelJSON.put("limbo_balance", aForceClosedChannel.getLimboBalance());
-     aForceClosedChannelJSON.put("maturity_height", aForceClosedChannel.getMaturityHeight());
-     aForceClosedChannelJSON.put("blocks_til_maturity", aForceClosedChannel.getBlocksTilMaturity());
-     aForceClosedChannelJSON.put("recovered_balance", aForceClosedChannel.getRecoveredBalance());
-     pendingForceClosingChannelsArray.put(aForceClosedChannelJSON);
-
-    }
-
-    resJSON.put("pending_force_closing_channels", pendingForceClosingChannelsArray);
-
-
-
-
-    JSONArray waitingCloseChannelsArray = new JSONArray();
-
-    List < WaitingCloseChannel > waitingCloseChannels = response.getWaitingCloseChannelsList();
-
-    for (int i = 0; i < waitingCloseChannels.size(); i++) {
-     WaitingCloseChannel aWaitingCloseChannel = waitingCloseChannels.get(i);
-     JSONObject aWaitingCloseChannelJSON = new JSONObject();
-     aWaitingCloseChannelJSON.put("channel", getPendingChannelJSON(aWaitingCloseChannel.getChannel()));
-     aWaitingCloseChannelJSON.put("limbo_balance", aWaitingCloseChannel.getLimboBalance());
-
-
-     waitingCloseChannelsArray.put(aWaitingCloseChannelJSON);
-
-    }
-
-    resJSON.put("waiting_close_channels", waitingCloseChannelsArray);
-
-    return resJSON;
-
-   } catch (Exception e) {
-    return new JSONObject();
-   }
-
-
-  }
 
   public static void PendingChannels(final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
+
+   stub.pendingChannels(PendingChannelsRequest.getDefaultInstance(), new StreamObserver < PendingChannelsResponse > () {
     @Override
-    public void run() {
+    public void onNext(PendingChannelsResponse response) {
      try {
-
-      PendingChannelsResponse response = stub.pendingChannels(PendingChannelsRequest.getDefaultInstance());
-
       JSONObject resJSON = parsePendingChannels(response);
 
 
@@ -832,29 +822,41 @@
        callback.eventFired("");
       }
      }
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
 
     }
    });
-   thread.start();
 
   }
 
-
   public static void NewAddress(final String type, final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
+   AddressType addressType = AddressType.WITNESS_PUBKEY_HASH;
+   if ("np2wkh".equals(type)) {
+    addressType = AddressType.NESTED_PUBKEY_HASH;
+   }
+
+
+   NewAddressRequest.Builder req = NewAddressRequest.newBuilder().setType(addressType);
+   stub.newAddress(req.build(), new StreamObserver < NewAddressResponse > () {
     @Override
-    public void run() {
+    public void onNext(NewAddressResponse response) {
+
      try {
-
-      AddressType addressType = AddressType.WITNESS_PUBKEY_HASH;
-      if ("np2wkh".equals(type)) {
-       addressType = AddressType.NESTED_PUBKEY_HASH;
-      }
-
-
-      NewAddressRequest.Builder req = NewAddressRequest.newBuilder().setType(addressType);
-
-      NewAddressResponse response = stub.newAddress(req.build());
 
       JSONObject resJson = new JSONObject();
       resJson.put("address", response.getAddress());
@@ -877,44 +879,38 @@
        callback.eventFired("");
       }
      }
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
 
     }
    });
-   thread.start();
 
   }
 
-  private static JSONObject parsePayReq(PayReq response){
-      try{
-          JSONObject resJson = new JSONObject();
-      resJson.put("destination", response.getDestination());
-      resJson.put("payment_hash", response.getPaymentHash());
-      resJson.put("num_satoshis", response.getNumSatoshis());
-      resJson.put("timestamp", response.getTimestamp());
-      resJson.put("expiry", response.getExpiry());
-      resJson.put("description", response.getDescription());
-      resJson.put("description_hash", response.getDescriptionHash());
-      resJson.put("fallback_addr", response.getFallbackAddr());
-      resJson.put("cltv_expiry", response.getCltvExpiry());
-      
-      return resJson;
 
-      }
-      catch(Exception e){
-          
-      }
-      return new JSONObject();
-  }
   public static void DecodePayReq(final String pay_req, final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
+
+   PayReqString payReqReq = PayReqString.newBuilder().setPayReq(pay_req).build();
+
+   stub.decodePayReq(payReqReq, new StreamObserver < PayReq > () {
     @Override
-    public void run() {
+    public void onNext(PayReq response) {
 
      try {
-      PayReqString payReqReq = PayReqString.newBuilder().setPayReq(pay_req).build();
-      PayReq response = stub.decodePayReq(payReqReq);
-
-      
 
       JSONObject json = new JSONObject();
       json.put("error", false);
@@ -932,46 +928,42 @@
        callback.eventFired("");
       }
      }
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
 
     }
    });
-   thread.start();
-
 
   }
 
-  private static JSONObject parseSendPayment(SendResponse response){
-      try{
-            JSONObject resJson = new JSONObject();
-      resJson.put("payment_error", response.getPaymentError());
-      resJson.put("payment_preimage", bytesToHex(response.getPaymentPreimage().toByteArray()));
-      resJson.put("payment_route", response.getPaymentRoute().toString());
-        return resJson;
 
-      
-      }
-      catch(Exception e){
-          
-      }
-      return new JSONObject();
-  }
   public static void SendPayment(final String pay_req, final long amount, final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
+   SendRequest.Builder sendReqBuilder = SendRequest.newBuilder();
+
+   sendReqBuilder.setPaymentRequest(pay_req);
+
+   if (amount != -1) {
+    sendReqBuilder.setAmt(amount);
+   }
+
+   stub.sendPaymentSync(sendReqBuilder.build(), new StreamObserver < SendResponse > () {
     @Override
-    public void run() {
-
+    public void onNext(SendResponse response) {
      try {
-        
-        
-      SendRequest.Builder sendReqBuilder = SendRequest.newBuilder();
-
-      sendReqBuilder.setPaymentRequest(pay_req);
-
-      if (amount != -1) {
-       sendReqBuilder.setAmt(amount);
-      }
-
-      SendResponse response = stub.sendPaymentSync(sendReqBuilder.build());
 
       JSONObject json = new JSONObject();
       json.put("error", false);
@@ -989,35 +981,46 @@
        callback.eventFired("");
       }
      }
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
 
     }
    });
-   thread.start();
-
 
   }
 
   public static void SendCoins(final long amount, final String address, final long fee, final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
+   SendCoinsRequest.Builder sendReqBuilder = SendCoinsRequest.newBuilder();
+   sendReqBuilder.setAddr(address);
+
+   if (amount == -1) {
+    sendReqBuilder.setSendAll(true);
+   } else {
+    sendReqBuilder.setAmount(amount);
+   }
+
+   if (fee != -1) {
+    sendReqBuilder.setSatPerByte(fee);
+   }
+
+   stub.sendCoins(sendReqBuilder.build(), new StreamObserver < SendCoinsResponse > () {
     @Override
-    public void run() {
-
+    public void onNext(SendCoinsResponse response) {
      try {
-      SendCoinsRequest.Builder sendReqBuilder = SendCoinsRequest.newBuilder();
-      sendReqBuilder.setAddr(address);
-      
-      if(amount == -1){
-        sendReqBuilder.setSendAll(true);
-      }else{
-        sendReqBuilder.setAmount(amount);
-      }
-      
-      if(fee != -1){
-        sendReqBuilder.setSatPerByte(fee);
-      }
-
-      SendCoinsResponse response = stub.sendCoins(sendReqBuilder.build());
-
       JSONObject resJson = new JSONObject();
       resJson.put("txid", response.getTxid());
 
@@ -1038,26 +1041,36 @@
        callback.eventFired("");
       }
      }
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
 
     }
    });
-   thread.start();
-
-
   }
 
   public static void ConnectPeer(final String pubKey, final String host, final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
+   LightningAddress.Builder lightningAddBuilder = LightningAddress.newBuilder().setPubkey(pubKey);
+   lightningAddBuilder.setHost(host);
+   ConnectPeerRequest connectPeerReq = ConnectPeerRequest.newBuilder().setAddr(lightningAddBuilder.build()).build();
+
+   stub.connectPeer(connectPeerReq, new StreamObserver < ConnectPeerResponse > () {
     @Override
-    public void run() {
-
+    public void onNext(ConnectPeerResponse response) {
      try {
-
-      LightningAddress.Builder lightningAddBuilder = LightningAddress.newBuilder().setPubkey(pubKey);
-      lightningAddBuilder.setHost(host);
-      ConnectPeerRequest connectPeerReq = ConnectPeerRequest.newBuilder().setAddr(lightningAddBuilder.build()).build();
-
-      ConnectPeerResponse response = stub.connectPeer(connectPeerReq);
 
       JSONObject json = new JSONObject();
       json.put("error", false);
@@ -1075,29 +1088,42 @@
        callback.eventFired("");
       }
      }
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
 
     }
    });
-   thread.start();
-
 
   }
 
   public static void AddInvoice(final long amount, final long expiry, final String memo, final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
+   Invoice.Builder invoiceReq = Invoice.newBuilder();
+   invoiceReq.setValue(amount);
+   if (memo != null) {
+    invoiceReq.setMemo(memo);
+   }
+
+   invoiceReq.setExpiry(expiry);
+
+   stub.addInvoice(invoiceReq.build(), new StreamObserver < AddInvoiceResponse > () {
     @Override
-    public void run() {
+    public void onNext(AddInvoiceResponse response) {
+
      try {
-      Invoice.Builder invoiceReq = Invoice.newBuilder();
-      invoiceReq.setValue(amount);
-      if (memo != null) {
-       invoiceReq.setMemo(memo);
-      }
-
-      invoiceReq.setExpiry(expiry);
-
-      AddInvoiceResponse response = stub.addInvoice(invoiceReq.build());
-
       JSONObject resJson = new JSONObject();
       resJson.put("payment_request", response.getPaymentRequest());
 
@@ -1120,10 +1146,321 @@
      }
 
     }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
+
+    }
    });
-   thread.start();
+
 
   }
+
+  public static void AddHoldInvoice(final String hash, final long amount, final long expiry, final String memo, final CallbackInterface callback) throws IOException {
+   AddHoldInvoiceRequest.Builder holdInvoiceRequest = AddHoldInvoiceRequest.newBuilder();
+
+   holdInvoiceRequest.setHash(ByteString.copyFrom(hexStringToByteArray(hash)));
+   holdInvoiceRequest.setValue(amount);
+
+   if (memo != null) {
+    holdInvoiceRequest.setMemo(memo);
+   }
+
+   holdInvoiceRequest.setExpiry(expiry);
+
+   stubInvoices.addHoldInvoice(holdInvoiceRequest.build(), new StreamObserver < AddHoldInvoiceResp > () {
+    @Override
+    public void onNext(AddHoldInvoiceResp response) {
+
+     try {
+      JSONObject resJson = new JSONObject();
+      resJson.put("payment_request", response.getPaymentRequest());
+
+
+      JSONObject json = new JSONObject();
+      json.put("error", false);
+      json.put("response", resJson);
+
+      callback.eventFired(json.toString());
+
+
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+       callback.eventFired("");
+      }
+     }
+
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
+
+    }
+   });
+  }
+
+
+  public static void OpenChannel(final String pubKey, final long local_amount, final CallbackInterface callback) throws IOException {
+
+   OpenChannelRequest.Builder openChannelReq = OpenChannelRequest.newBuilder();
+   openChannelReq.setNodePubkeyString(pubKey);
+
+   openChannelReq.setNodePubkey(ByteString.copyFrom(hexStringToByteArray(pubKey)));
+   openChannelReq.setLocalFundingAmount(local_amount);
+
+   stub.openChannel(openChannelReq.build(), new StreamObserver < OpenStatusUpdate > () {
+    @Override
+    public void onNext(OpenStatusUpdate response) {
+
+     try {
+      System.out.println("logged " + response.toString());
+
+
+      JSONObject json = new JSONObject();
+      json.put("error", false);
+      json.put("response", parseOpenChannel(response));
+
+
+      callback.eventFired(json.toString());
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+       callback.eventFired("");
+      }
+     }
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
+
+    }
+   });
+
+  }
+
+
+
+  public static void GetNodeInfo(final String pubkey, final CallbackInterface callback) throws IOException {
+
+   System.out.println("start get node info");
+   NodeInfoRequest.Builder req = NodeInfoRequest.newBuilder();
+   req.setPubKey(pubkey);
+   stub.getNodeInfo(req.build(), new StreamObserver < NodeInfo > () {
+    @Override
+    public void onNext(NodeInfo response) {
+
+     try {
+
+
+      JSONObject json = new JSONObject();
+      json.put("error", false);
+      json.put("response", parseNodeInfo(response));
+
+
+      callback.eventFired(json.toString());
+
+
+
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+       callback.eventFired("");
+      }
+     }
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
+
+    }
+   });
+
+  }
+
+  public static void CloseChannel(final String txid, final int output, final boolean force, final CallbackInterface callback) throws IOException {
+   CloseChannelRequest.Builder req = CloseChannelRequest.newBuilder();
+
+   ChannelPoint.Builder cp = ChannelPoint.newBuilder();
+   cp.setFundingTxidStr(txid);
+   cp.setOutputIndex(output);
+   req.setChannelPoint(cp.build());
+   req.setForce(force);
+
+   stub.closeChannel(req.build(), new StreamObserver < CloseStatusUpdate > () {
+    @Override
+    public void onNext(CloseStatusUpdate response) {
+
+     try {
+
+
+      System.out.println("got close channel");
+
+
+      JSONObject json = new JSONObject();
+      json.put("error", false);
+      json.put("response", parseCloseChannel(response));
+
+
+      callback.eventFired(json.toString());
+
+
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+       callback.eventFired("");
+      }
+     }
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
+
+    }
+   });
+
+
+
+  }
+
+
+  public static void SubscribeInvoices(final CallbackInterface callback) throws IOException {
+
+   InvoiceSubscription request = InvoiceSubscription.getDefaultInstance();
+
+   stub.subscribeInvoices(request, new StreamObserver < Invoice > () {
+    @Override
+    public void onNext(Invoice response) {
+
+     try {
+
+      JSONObject anInvoiceJSON = parseInvoice(response);
+
+      JSONObject json = new JSONObject();
+      json.put("error", false);
+      json.put("response", anInvoiceJSON);
+      callback.eventFired(json.toString());
+
+
+
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       System.out.println("error " + e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+
+       callback.eventFired(e2.toString());
+      }
+     }
+
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
+
+    }
+   });
+
+  }
+
+
 
   private static JSONObject parseOpenChannel(final OpenStatusUpdate openStatusUpdate) {
    try {
@@ -1147,13 +1484,6 @@
     pendingUpdateJson.put("output_index", pendingUpdate.getOutputIndex());
 
     JSONObject confirmationUpdateJson = new JSONObject();
-    //confirmationUpdateJson.put("block_height", confirmationUpdate.getBlockHeight());
-
-    //confirmationUpdateJson.put("num_confs_left", confirmationUpdate.getNumConfsLeft());
-
-    //confirmationUpdateJson.put("block_sha", bytesToHex(confirmationUpdate.getBlockSha().toByteArray()));
-
-
 
 
     JSONObject jsonCombined = new JSONObject();
@@ -1168,252 +1498,6 @@
 
    return new JSONObject();
   }
-
-  public static void OpenChannel(final String pubKey, final long local_amount, final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
-    @Override
-    public void run() {
-
-     try {
-      System.out.println("pubKey " + pubKey);
-
-      OpenChannelRequest.Builder openChannelReq = OpenChannelRequest.newBuilder();
-      openChannelReq.setNodePubkeyString(pubKey);
-
-      openChannelReq.setNodePubkey(ByteString.copyFrom(hexStringToByteArray(pubKey)));
-      openChannelReq.setLocalFundingAmount(local_amount);
-
-      Iterator < OpenStatusUpdate > iterator = stub.openChannel(openChannelReq.build());
-      while (iterator.hasNext()) {
-       OpenStatusUpdate openStatusUpdate = iterator.next();
-       System.out.println("logged " + openStatusUpdate.toString());
-
-
-       JSONObject json = new JSONObject();
-       json.put("error", false);
-       json.put("response", parseOpenChannel(openStatusUpdate));
-
-
-       callback.eventFired(json.toString());
-
-      }
-
-     } catch (Exception e) {
-      try {
-       JSONObject json = new JSONObject();
-       json.put("error", true);
-       json.put("response", e.toString());
-
-       callback.eventFired(json.toString());
-      } catch (Exception e2) {
-       callback.eventFired("");
-      }
-     }
-
-    }
-   });
-   thread.start();
-
-
-  }
-
-  private static JSONObject parseNodeInfo(NodeInfo nodeInfo) {
-   try {
-    JSONObject nodeInfoJson = new JSONObject();
-    nodeInfoJson.put("alias", nodeInfo.getNode().getAlias());
-
-
-    JSONObject nodeJson = new JSONObject();
-    nodeJson.put("node", nodeInfoJson);
-
-    return nodeJson;
-   } catch (Exception e) {
-    return new JSONObject();
-   }
-  }
-
-  public static void GetNodeInfo(final String pubkey, final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
-    @Override
-    public void run() {
-
-     try {
-
-      System.out.println("start get node info");
-      NodeInfoRequest.Builder req = NodeInfoRequest.newBuilder();
-      req.setPubKey(pubkey);
-
-      NodeInfo nodeInfo = stub.getNodeInfo(req.build());
-
-
-      System.out.println("got node info");
-
-
-
-      JSONObject json = new JSONObject();
-      json.put("error", false);
-      json.put("response", parseNodeInfo(nodeInfo));
-
-
-      callback.eventFired(json.toString());
-
-
-
-     } catch (Exception e) {
-      try {
-       JSONObject json = new JSONObject();
-       json.put("error", true);
-       json.put("response", e.toString());
-
-       callback.eventFired(json.toString());
-      } catch (Exception e2) {
-       callback.eventFired("");
-      }
-     }
-
-    }
-   });
-   thread.start();
-
-
-  }
-
-    private static JSONObject parseCloseChannel(CloseStatusUpdate closeStatusUpdate){
-        try{
-            
-             ChannelCloseUpdate channelCloseUpdate = closeStatusUpdate.getChanClose();
-       PendingUpdate pendingUpdate = closeStatusUpdate.getClosePending();
-       //ConfirmationUpdate confirmationUpdate = closeStatusUpdate.getConfirmation();
-
-       JSONObject chanCloseJSON = new JSONObject();
-       chanCloseJSON.put("closing_txid", bytesToHex(channelCloseUpdate.getClosingTxid().toByteArray()));
-       chanCloseJSON.put("success", channelCloseUpdate.getSuccess());
-
-       JSONObject pendingUpdateJson = new JSONObject();
-       pendingUpdateJson.put("txid", bytesToHex(pendingUpdate.getTxid().toByteArray()));
-       pendingUpdateJson.put("output_index", pendingUpdate.getOutputIndex());
-
-       JSONObject confirmationUpdateJson = new JSONObject();
-       //confirmationUpdateJson.put("block_height", confirmationUpdate.getBlockHeight());
-       //confirmationUpdateJson.put("num_confs_left", confirmationUpdate.getNumConfsLeft());
-       //confirmationUpdateJson.put("block_sha", bytesToHex(confirmationUpdate.getBlockSha().toByteArray()));
-
-
-
-       JSONObject jsonCombined = new JSONObject();
-       jsonCombined.put("chan_close", chanCloseJSON);
-       jsonCombined.put("pending_update", pendingUpdateJson);
-       jsonCombined.put("confirmation_update", confirmationUpdateJson);
-       
-       return jsonCombined;
-            
-        }
-        catch(Exception e){
-            
-        }
-        return new JSONObject();
-    }
-
-
-  public static void CloseChannel(final String txid, final int output, final boolean force, final CallbackInterface callback) throws IOException {
-   Thread thread = new Thread(new Runnable() {
-    @Override
-    public void run() {
-
-     try {
-
-      System.out.println("start close channel");
-      CloseChannelRequest.Builder req = CloseChannelRequest.newBuilder();
-
-      ChannelPoint.Builder cp = ChannelPoint.newBuilder();
-      cp.setFundingTxidStr(txid);
-      cp.setOutputIndex(output);
-      req.setChannelPoint(cp.build());
-      req.setForce(force);
-      Iterator < CloseStatusUpdate > iterator = stub.closeChannel(req.build());
-
-
-      System.out.println("getting close channel");
-      while (iterator.hasNext()) {
-
-       System.out.println("got close channel");
-
-       CloseStatusUpdate closeStatusUpdate = iterator.next();
- 
-
-       JSONObject json = new JSONObject();
-       json.put("error", false);
-       json.put("response", parseCloseChannel(closeStatusUpdate));
-
-
-       callback.eventFired(json.toString());
-
-      }
-
-
-     } catch (Exception e) {
-      try {
-       JSONObject json = new JSONObject();
-       json.put("error", true);
-       json.put("response", e.toString());
-
-       callback.eventFired(json.toString());
-      } catch (Exception e2) {
-       callback.eventFired("");
-      }
-     }
-
-    }
-   });
-   thread.start();
-
-
-  }
-
-
-  public static void SubscribeInvoices(final CallbackInterface callback) throws IOException {
-
-   Thread thread = new Thread(new Runnable() {
-    @Override
-    public void run() {
-
-     try {
-      InvoiceSubscription request = InvoiceSubscription.getDefaultInstance();
-
-      Iterator < Invoice > iterator = stub.subscribeInvoices(request);
-      while (iterator.hasNext()) {
-       Invoice anInvoice = iterator.next();
-
-       JSONObject anInvoiceJSON = parseInvoice(anInvoice);
-
-       JSONObject json = new JSONObject();
-       json.put("error", false);
-       json.put("response", anInvoiceJSON);
-       callback.eventFired(json.toString());
-      }
-
-
-     } catch (Exception e) {
-      try {
-       JSONObject json = new JSONObject();
-       json.put("error", true);
-       json.put("response", e.toString());
-
-       System.out.println("error " + e.toString());
-
-       callback.eventFired(json.toString());
-      } catch (Exception e2) {
-
-       callback.eventFired(e2.toString());
-      }
-     }
-
-    }
-   });
-   thread.start();
-
-  }
-
   private static JSONObject parseInvoice(Invoice anInvoice) {
    try {
     JSONObject anInvoiceJSON = new JSONObject();
@@ -1449,9 +1533,9 @@
    return GenSeedRequest.getDefaultInstance().toByteArray();
 
   }
-  
+
   public static byte[] makeStopDaemonRequest() throws IOException {
-      
+
    return StopRequest.getDefaultInstance().toByteArray();
 
   }
@@ -1497,7 +1581,7 @@
 
    UnlockWalletRequest.Builder req = UnlockWalletRequest.newBuilder();
    ByteString passwordBS = ByteString.copyFromUtf8(password);
- 
+
    req.setWalletPassword(passwordBS);
    //req.setRecoveryWindow(250);
 
@@ -1506,36 +1590,43 @@
   }
 
   public static byte[] makeCreateWalletRequest(String passphrase, String password, int recoveryWindow, String channelBackup) throws IOException {
-    
+
    InitWalletRequest.Builder req = InitWalletRequest.newBuilder();
-    
+
    String[] passphraseArray = passphrase.split(" ");
 
- 
+
    for (int i = 0; i < passphraseArray.length; i++) {
-     
+
     req.addCipherSeedMnemonic(passphraseArray[i]);
 
    }
    System.out.println("starting");
    ByteString passwordBS = ByteString.copyFrom(password, "UTF-8");
- 
+
 
    req.setWalletPassword(passwordBS);
-   if(recoveryWindow != -1){
-      req.setRecoveryWindow(recoveryWindow);
+   if (recoveryWindow != -1) {
+    req.setRecoveryWindow(recoveryWindow);
    }
-   
-   if(channelBackup != ""){
-      ChanBackupSnapshot.Builder snapShotBuilder = ChanBackupSnapshot.newBuilder();
-      MultiChanBackup.Builder multiChanBuilder = MultiChanBackup.newBuilder();
-      multiChanBuilder.setMultiChanBackup(ByteString.copyFrom(Base64.decodeBase64(channelBackup)));
-      snapShotBuilder.setMultiChanBackup(multiChanBuilder.build());
-      req.setChannelBackups(snapShotBuilder.build());
-              
+
+   if (channelBackup != "") {
+    ChanBackupSnapshot.Builder snapShotBuilder = ChanBackupSnapshot.newBuilder();
+    MultiChanBackup.Builder multiChanBuilder = MultiChanBackup.newBuilder();
+    multiChanBuilder.setMultiChanBackup(ByteString.copyFrom(Base64.decodeBase64(channelBackup)));
+    snapShotBuilder.setMultiChanBackup(multiChanBuilder.build());
+    req.setChannelBackups(snapShotBuilder.build());
+
    }
 
    return req.build().toByteArray();
+
+  }
+
+  public static byte[] makeChannelGraphRequest() throws IOException {
+
+
+   return ChannelGraphRequest.getDefaultInstance().toByteArray();
 
   }
 
@@ -1572,8 +1663,8 @@
 
   public static byte[] makeGetNodeInfoRequest(String pubKey) throws IOException {
 
-    NodeInfoRequest.Builder req = NodeInfoRequest.newBuilder();
-    req.setPubKey(pubKey);
+   NodeInfoRequest.Builder req = NodeInfoRequest.newBuilder();
+   req.setPubKey(pubKey);
    return req.build().toByteArray();
 
   }
@@ -1601,23 +1692,42 @@
    return InvoiceSubscription.getDefaultInstance().toByteArray();
 
   }
-  
-   public static byte[] makeSubscribeSingleInvoiceRequest(String rhash) throws IOException {
-        
-       SubscribeSingleInvoiceRequest.Builder subscribeSingleInvoiceRequest = SubscribeSingleInvoiceRequest.newBuilder();
-       subscribeSingleInvoiceRequest.setRHash(ByteString.copyFrom(hexStringToByteArray(rhash)));
-       
+
+  public static byte[] makeSubscribeSingleInvoiceRequest(String rhash) throws IOException {
+
+   SubscribeSingleInvoiceRequest.Builder subscribeSingleInvoiceRequest = SubscribeSingleInvoiceRequest.newBuilder();
+   subscribeSingleInvoiceRequest.setRHash(ByteString.copyFrom(hexStringToByteArray(rhash)));
+
    return subscribeSingleInvoiceRequest.build().toByteArray();
 
   }
-  
-  
+
+
   public static byte[] makePayReqString(String payReq) throws IOException {
 
    return PayReqString.newBuilder().setPayReq(payReq).build().toByteArray();
 
   }
-  
+  private static JSONObject parsePayReq(PayReq response) {
+   try {
+    JSONObject resJson = new JSONObject();
+    resJson.put("destination", response.getDestination());
+    resJson.put("payment_hash", response.getPaymentHash());
+    resJson.put("num_satoshis", response.getNumSatoshis());
+    resJson.put("timestamp", response.getTimestamp());
+    resJson.put("expiry", response.getExpiry());
+    resJson.put("description", response.getDescription());
+    resJson.put("description_hash", response.getDescriptionHash());
+    resJson.put("fallback_addr", response.getFallbackAddr());
+    resJson.put("cltv_expiry", response.getCltvExpiry());
+
+    return resJson;
+
+   } catch (Exception e) {
+
+   }
+   return new JSONObject();
+  }
   public static String parsePayReqResponse(String res) {
 
    byte[] data = Base64.decodeBase64(res);
@@ -1645,15 +1755,15 @@
    }
 
   }
-  
-          
-          
-   public static String parseSettleInvoiceResponse(String res) {
+
+
+
+  public static String parseSettleInvoiceResponse(String res) {
 
    byte[] data = Base64.decodeBase64(res);
    try {
     SettleInvoiceResp response = SettleInvoiceResp.parseFrom(data);
-  
+
     JSONObject resJson = new JSONObject();
     resJson.put("success", true);
 
@@ -1679,13 +1789,13 @@
    }
 
   }
-   
-    public static String parseCancelInvoiceResponse(String res) {
+
+  public static String parseCancelInvoiceResponse(String res) {
 
    byte[] data = Base64.decodeBase64(res);
    try {
     CancelInvoiceResp response = CancelInvoiceResp.parseFrom(data);
-  
+
     JSONObject resJson = new JSONObject();
     resJson.put("success", true);
 
@@ -1711,13 +1821,13 @@
    }
 
   }
-  
+
   public static String parseAddHoldInvoiceResponse(String res) {
 
    byte[] data = Base64.decodeBase64(res);
    try {
     AddHoldInvoiceResp response = AddHoldInvoiceResp.parseFrom(data);
-  
+
     JSONObject resJson = new JSONObject();
     resJson.put("payment_request", response.getPaymentRequest());
 
@@ -1743,43 +1853,43 @@
    }
 
   }
-  
-  public static byte[] makeSettleInvoiceMsg( final String preimage) throws IOException {
 
-    SettleInvoiceMsg.Builder settleInvoiceMsg = SettleInvoiceMsg.newBuilder();
-    settleInvoiceMsg.setPreimage(ByteString.copyFrom(hexStringToByteArray(preimage))); 
+  public static byte[] makeSettleInvoiceMsg(final String preimage) throws IOException {
 
-   return  settleInvoiceMsg.build().toByteArray();
+   SettleInvoiceMsg.Builder settleInvoiceMsg = SettleInvoiceMsg.newBuilder();
+   settleInvoiceMsg.setPreimage(ByteString.copyFrom(hexStringToByteArray(preimage)));
 
-  }
-  
-  
-    public static byte[] makeCancelInvoiceMsg( final String rhash) throws IOException {
-        
-    CancelInvoiceMsg.Builder cancelInvoiceMsg = CancelInvoiceMsg.newBuilder();
-    cancelInvoiceMsg.setPaymentHash(ByteString.copyFrom(hexStringToByteArray(rhash))); 
-
-   return  cancelInvoiceMsg.build().toByteArray();
+   return settleInvoiceMsg.build().toByteArray();
 
   }
 
 
-  
-    public static byte[] makeAddHoldInvoiceRequest( final String hash, final long amount,final long expiry, final String memo) throws IOException {
+  public static byte[] makeCancelInvoiceMsg(final String rhash) throws IOException {
 
-    
-    AddHoldInvoiceRequest.Builder holdInvoiceRequest = AddHoldInvoiceRequest.newBuilder();
-      
-      holdInvoiceRequest.setHash(ByteString.copyFrom(hexStringToByteArray(hash)));
-      holdInvoiceRequest.setValue(amount);
-       
+   CancelInvoiceMsg.Builder cancelInvoiceMsg = CancelInvoiceMsg.newBuilder();
+   cancelInvoiceMsg.setPaymentHash(ByteString.copyFrom(hexStringToByteArray(rhash)));
+
+   return cancelInvoiceMsg.build().toByteArray();
+
+  }
+
+
+
+  public static byte[] makeAddHoldInvoiceRequest(final String hash, final long amount, final long expiry, final String memo) throws IOException {
+
+
+   AddHoldInvoiceRequest.Builder holdInvoiceRequest = AddHoldInvoiceRequest.newBuilder();
+
+   holdInvoiceRequest.setHash(ByteString.copyFrom(hexStringToByteArray(hash)));
+   holdInvoiceRequest.setValue(amount);
+
    if (memo != null) {
-     holdInvoiceRequest.setMemo(memo);
+    holdInvoiceRequest.setMemo(memo);
    }
 
-    holdInvoiceRequest.setExpiry(expiry);
+   holdInvoiceRequest.setExpiry(expiry);
 
-   return  holdInvoiceRequest.build().toByteArray();
+   return holdInvoiceRequest.build().toByteArray();
 
   }
 
@@ -1920,7 +2030,7 @@
    }
 
   }
-  
+
   public static String parseExportChannelResponse(String res) {
 
    byte[] data = Base64.decodeBase64(res);
@@ -1959,6 +2069,36 @@
 
 
     JSONObject resJson = parseGetInfo(response);
+    JSONObject json = new JSONObject();
+    json.put("error", false);
+    json.put("response", resJson);
+
+    return json.toString();
+
+
+   } catch (Exception e) {
+    try {
+     JSONObject json = new JSONObject();
+     json.put("error", true);
+     json.put("response", e.getLocalizedMessage());
+     return json.toString();
+    } catch (Exception e2) {
+     System.out.println(e2);
+     return "";
+    }
+
+   }
+
+  }
+
+  public static String parseChannelGraphRes(String res) {
+
+   byte[] data = Base64.decodeBase64(res);
+   try {
+    ChannelGraph response = ChannelGraph.parseFrom(data);
+
+
+    JSONObject resJson = parseChannelGraph(response);
     JSONObject json = new JSONObject();
     json.put("error", false);
     json.put("response", resJson);
@@ -2071,12 +2211,12 @@
    }
 
   }
-  public static String parseConnectPeerResponse(String res){
-      
-      
+  public static String parseConnectPeerResponse(String res) {
+
+
    byte[] data = Base64.decodeBase64(res);
    try {
-   ConnectPeerResponse response = ConnectPeerResponse.parseFrom(data);
+    ConnectPeerResponse response = ConnectPeerResponse.parseFrom(data);
 
 
     JSONObject json = new JSONObject();
@@ -2097,7 +2237,7 @@
      return "";
     }
 
-   } 
+   }
   }
 
 
@@ -2129,31 +2269,31 @@
    }
 
   }
-  
+
   public static byte[] makeExportAllChannelBackupsRequest() throws IOException {
-   
-     
-      return ChanBackupExportRequest.getDefaultInstance().toByteArray();
-      
+
+
+   return ChanBackupExportRequest.getDefaultInstance().toByteArray();
+
   }
-   
-  
+
+
   public static byte[] makeSendCoinsRequest(final long amount, final String address, final long fee) throws IOException {
-   
-      SendCoinsRequest.Builder sendReqBuilder = SendCoinsRequest.newBuilder();
-      sendReqBuilder.setAddr(address);
-      if(amount == -1){
-          sendReqBuilder.setSendAll(true);
-      }else{
-          sendReqBuilder.setAmount(amount);
-      }
-      
-      if(fee != -1){
-        sendReqBuilder.setSatPerByte(fee);
-      }
-      
-      return sendReqBuilder.build().toByteArray();
-      
+
+   SendCoinsRequest.Builder sendReqBuilder = SendCoinsRequest.newBuilder();
+   sendReqBuilder.setAddr(address);
+   if (amount == -1) {
+    sendReqBuilder.setSendAll(true);
+   } else {
+    sendReqBuilder.setAmount(amount);
+   }
+
+   if (fee != -1) {
+    sendReqBuilder.setSatPerByte(fee);
+   }
+
+   return sendReqBuilder.build().toByteArray();
+
   }
 
 
@@ -2169,26 +2309,26 @@
 
    return sendReqBuilder.build().toByteArray();
   }
-  
-  public static byte[] makeCloseChannelRequest(final String txid, final int output, final boolean force) throws IOException {
-   
-      CloseChannelRequest.Builder req = CloseChannelRequest.newBuilder();
 
-      ChannelPoint.Builder cp = ChannelPoint.newBuilder();
-      cp.setFundingTxidStr(txid);
-      cp.setOutputIndex(output);
-      req.setChannelPoint(cp.build());
-      req.setForce(force);
-      
-      return req.build().toByteArray();
-      
+  public static byte[] makeCloseChannelRequest(final String txid, final int output, final boolean force) throws IOException {
+
+   CloseChannelRequest.Builder req = CloseChannelRequest.newBuilder();
+
+   ChannelPoint.Builder cp = ChannelPoint.newBuilder();
+   cp.setFundingTxidStr(txid);
+   cp.setOutputIndex(output);
+   req.setChannelPoint(cp.build());
+   req.setForce(force);
+
+   return req.build().toByteArray();
+
   }
-  
-  public static byte[] makeConnectPeerRequest (final String pubKey, final String host) throws IOException {
-    
-      LightningAddress.Builder lightningAddBuilder = LightningAddress.newBuilder().setPubkey(pubKey);
-      lightningAddBuilder.setHost(host);
-      return ConnectPeerRequest.newBuilder().setAddr(lightningAddBuilder.build()).build().toByteArray();
+
+  public static byte[] makeConnectPeerRequest(final String pubKey, final String host) throws IOException {
+
+   LightningAddress.Builder lightningAddBuilder = LightningAddress.newBuilder().setPubkey(pubKey);
+   lightningAddBuilder.setHost(host);
+   return ConnectPeerRequest.newBuilder().setAddr(lightningAddBuilder.build()).build().toByteArray();
   }
 
   public static byte[] makeOpenChannelRequest(final String pubKey, final long local_amount) throws IOException {
@@ -2203,7 +2343,7 @@
   }
 
   public static byte[] makeNewAddressRequest(final String type) throws IOException {
- 
+
    AddressType addressType = AddressType.WITNESS_PUBKEY_HASH;
    if ("np2wkh".equals(type)) {
     System.out.println("setting address type " + type);
@@ -2218,21 +2358,21 @@
 
    return req.build().toByteArray();
   }
-  
-  public static String parseSendCoinsResponse(String res){
-      
-      byte[] data = Base64.decodeBase64(res);
+
+  public static String parseSendCoinsResponse(String res) {
+
+   byte[] data = Base64.decodeBase64(res);
    try {
     SendCoinsResponse response = SendCoinsResponse.parseFrom(data);
- 
+
 
     JSONObject resJson = new JSONObject();
-      resJson.put("txid", response.getTxid());
-      
-      
+    resJson.put("txid", response.getTxid());
+
+
     JSONObject json = new JSONObject();
     json.put("error", false);
-    json.put("response",  resJson);
+    json.put("response", resJson);
 
     return json.toString();
 
@@ -2249,21 +2389,34 @@
     }
 
    }
-       
-      
-  }
-  
 
+
+  }
+
+  private static JSONObject parseSendPayment(SendResponse response) {
+   try {
+    JSONObject resJson = new JSONObject();
+    resJson.put("payment_error", response.getPaymentError());
+    resJson.put("payment_preimage", bytesToHex(response.getPaymentPreimage().toByteArray()));
+    resJson.put("payment_route", response.getPaymentRoute().toString());
+    return resJson;
+
+
+   } catch (Exception e) {
+
+   }
+   return new JSONObject();
+  }
   public static String parseCloseChannelResponse(String res) {
 
    byte[] data = Base64.decodeBase64(res);
    try {
     CloseStatusUpdate response = CloseStatusUpdate.parseFrom(data);
- 
+
 
     JSONObject json = new JSONObject();
     json.put("error", false);
-    json.put("response",  parseCloseChannel(response));
+    json.put("response", parseCloseChannel(response));
 
     return json.toString();
 
@@ -2280,6 +2433,114 @@
     }
 
    }
+
+  }
+  static JSONObject getPendingChannelJSON(PendingChannel pendingChannel) {
+
+   try {
+    JSONObject pendingChannelJSON = new JSONObject();
+
+    pendingChannelJSON.put("remote_node_pub", pendingChannel.getRemoteNodePub());
+    pendingChannelJSON.put("channel_point", pendingChannel.getChannelPoint());
+    pendingChannelJSON.put("capacity", pendingChannel.getCapacity());
+    pendingChannelJSON.put("local_balance", pendingChannel.getLocalBalance());
+    pendingChannelJSON.put("remote_balance", pendingChannel.getRemoteBalance());
+
+    return pendingChannelJSON;
+   } catch (Exception e) {
+
+    return null;
+   }
+  }
+  private static JSONObject parsePendingChannels(PendingChannelsResponse response) {
+   try {
+    JSONObject resJSON = new JSONObject();
+    resJSON.put("total_limbo_balance", response.getTotalLimboBalance());
+    JSONArray pendingOpenChannelsArray = new JSONArray();
+
+    List < PendingOpenChannel > pendingOpenChannels = response.getPendingOpenChannelsList();
+
+    for (int i = 0; i < pendingOpenChannels.size(); i++) {
+     PendingOpenChannel aPendingOpenChannels = pendingOpenChannels.get(i);
+     JSONObject aPendingOpenChannelJSON = new JSONObject();
+     aPendingOpenChannelJSON.put("channel", getPendingChannelJSON(aPendingOpenChannels.getChannel()));
+     aPendingOpenChannelJSON.put("confirmation_height", aPendingOpenChannels.getConfirmationHeight());
+     aPendingOpenChannelJSON.put("commit_fee", aPendingOpenChannels.getCommitFee());
+     aPendingOpenChannelJSON.put("commit_weight", aPendingOpenChannels.getCommitWeight());
+     aPendingOpenChannelJSON.put("fee_per_kw", aPendingOpenChannels.getFeePerKw());
+
+     pendingOpenChannelsArray.put(aPendingOpenChannelJSON);
+
+    }
+
+    resJSON.put("pending_open_channels", pendingOpenChannelsArray);
+
+
+    JSONArray pendingClosingChannelsArray = new JSONArray();
+
+    List < ClosedChannel > pendingClosingChannels = response.getPendingClosingChannelsList();
+
+    System.out.println("pending size");
+    System.out.println(pendingClosingChannels.size());
+    for (int i = 0; i < pendingClosingChannels.size(); i++) {
+
+     ClosedChannel aClosedChannel = pendingClosingChannels.get(i);
+     System.out.println(aClosedChannel.toString());
+     JSONObject aClosedChannelJSON = new JSONObject();
+     aClosedChannelJSON.put("channel", getPendingChannelJSON(aClosedChannel.getChannel()));
+     aClosedChannelJSON.put("closing_txid", aClosedChannel.getClosingTxid());
+     pendingClosingChannelsArray.put(aClosedChannelJSON);
+
+    }
+
+    resJSON.put("pending_closing_channels", pendingClosingChannelsArray);
+
+
+    JSONArray pendingForceClosingChannelsArray = new JSONArray();
+
+    List < ForceClosedChannel > pendingForceClosingChannels = response.getPendingForceClosingChannelsList();
+
+    for (int i = 0; i < pendingForceClosingChannels.size(); i++) {
+     ForceClosedChannel aForceClosedChannel = pendingForceClosingChannels.get(i);
+     JSONObject aForceClosedChannelJSON = new JSONObject();
+     aForceClosedChannelJSON.put("channel", getPendingChannelJSON(aForceClosedChannel.getChannel()));
+     aForceClosedChannelJSON.put("closing_txid", aForceClosedChannel.getClosingTxid());
+     aForceClosedChannelJSON.put("limbo_balance", aForceClosedChannel.getLimboBalance());
+     aForceClosedChannelJSON.put("maturity_height", aForceClosedChannel.getMaturityHeight());
+     aForceClosedChannelJSON.put("blocks_til_maturity", aForceClosedChannel.getBlocksTilMaturity());
+     aForceClosedChannelJSON.put("recovered_balance", aForceClosedChannel.getRecoveredBalance());
+     pendingForceClosingChannelsArray.put(aForceClosedChannelJSON);
+
+    }
+
+    resJSON.put("pending_force_closing_channels", pendingForceClosingChannelsArray);
+
+
+
+
+    JSONArray waitingCloseChannelsArray = new JSONArray();
+
+    List < WaitingCloseChannel > waitingCloseChannels = response.getWaitingCloseChannelsList();
+
+    for (int i = 0; i < waitingCloseChannels.size(); i++) {
+     WaitingCloseChannel aWaitingCloseChannel = waitingCloseChannels.get(i);
+     JSONObject aWaitingCloseChannelJSON = new JSONObject();
+     aWaitingCloseChannelJSON.put("channel", getPendingChannelJSON(aWaitingCloseChannel.getChannel()));
+     aWaitingCloseChannelJSON.put("limbo_balance", aWaitingCloseChannel.getLimboBalance());
+
+
+     waitingCloseChannelsArray.put(aWaitingCloseChannelJSON);
+
+    }
+
+    resJSON.put("waiting_close_channels", waitingCloseChannelsArray);
+
+    return resJSON;
+
+   } catch (Exception e) {
+    return new JSONObject();
+   }
+
 
   }
   public static String parseSendPaymentResponse(String res) {
@@ -2287,11 +2548,11 @@
    byte[] data = Base64.decodeBase64(res);
    try {
     SendResponse response = SendResponse.parseFrom(data);
- 
+
 
     JSONObject json = new JSONObject();
     json.put("error", false);
-    json.put("response",  parseSendPayment(response));
+    json.put("response", parseSendPayment(response));
 
     return json.toString();
 
@@ -2406,7 +2667,54 @@
 
   }
 
+  private static JSONObject parseCloseChannel(CloseStatusUpdate closeStatusUpdate) {
+   try {
 
+    ChannelCloseUpdate channelCloseUpdate = closeStatusUpdate.getChanClose();
+    PendingUpdate pendingUpdate = closeStatusUpdate.getClosePending();
+    //ConfirmationUpdate confirmationUpdate = closeStatusUpdate.getConfirmation();
+
+    JSONObject chanCloseJSON = new JSONObject();
+    chanCloseJSON.put("closing_txid", bytesToHex(channelCloseUpdate.getClosingTxid().toByteArray()));
+    chanCloseJSON.put("success", channelCloseUpdate.getSuccess());
+
+    JSONObject pendingUpdateJson = new JSONObject();
+    pendingUpdateJson.put("txid", bytesToHex(pendingUpdate.getTxid().toByteArray()));
+    pendingUpdateJson.put("output_index", pendingUpdate.getOutputIndex());
+
+    JSONObject confirmationUpdateJson = new JSONObject();
+    //confirmationUpdateJson.put("block_height", confirmationUpdate.getBlockHeight());
+    //confirmationUpdateJson.put("num_confs_left", confirmationUpdate.getNumConfsLeft());
+    //confirmationUpdateJson.put("block_sha", bytesToHex(confirmationUpdate.getBlockSha().toByteArray()));
+
+
+
+    JSONObject jsonCombined = new JSONObject();
+    jsonCombined.put("chan_close", chanCloseJSON);
+    jsonCombined.put("pending_update", pendingUpdateJson);
+    jsonCombined.put("confirmation_update", confirmationUpdateJson);
+
+    return jsonCombined;
+
+   } catch (Exception e) {
+
+   }
+   return new JSONObject();
+  }
+  private static JSONObject parseNodeInfo(NodeInfo nodeInfo) {
+   try {
+    JSONObject nodeInfoJson = new JSONObject();
+    nodeInfoJson.put("alias", nodeInfo.getNode().getAlias());
+
+
+    JSONObject nodeJson = new JSONObject();
+    nodeJson.put("node", nodeInfoJson);
+
+    return nodeJson;
+   } catch (Exception e) {
+    return new JSONObject();
+   }
+  }
   public static String parsePendingChannelsResponse(String res) {
 
    byte[] data = Base64.decodeBase64(res);
@@ -2440,9 +2748,33 @@
 
 
 
+  private static JSONArray parseListChannels(ListChannelsResponse response) {
+   try {
+    JSONArray resJson = new JSONArray();
 
+    List < Channel > channels = response.getChannelsList();
 
+    for (int i = 0; i < channels.size(); i++) {
+     Channel aChannel = channels.get(i);
 
+     JSONObject aChannelJSON = new JSONObject();
+     aChannelJSON.put("active", aChannel.getActive());
+     aChannelJSON.put("remote_pubkey", aChannel.getRemotePubkey());
+     aChannelJSON.put("channel_point", aChannel.getChannelPoint());
+     aChannelJSON.put("chan_id", aChannel.getChanId());
+     aChannelJSON.put("capacity", aChannel.getCapacity());
 
+     aChannelJSON.put("local_balance", aChannel.getLocalBalance());
+     aChannelJSON.put("remote_balance", aChannel.getRemoteBalance());
+
+     resJson.put(aChannelJSON);
+
+    }
+    return resJson;
+   } catch (Exception e) {
+    return new JSONArray();
+   }
+  }
+ 
 
  }
