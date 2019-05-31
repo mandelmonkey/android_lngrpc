@@ -951,7 +951,7 @@
   }
 
 
-  public static void SendPayment(final String pay_req, final long amount, final CallbackInterface callback) throws IOException {
+  public static void SendPaymentSync(final String pay_req, final long amount, final CallbackInterface callback) throws IOException {
    SendRequest.Builder sendReqBuilder = SendRequest.newBuilder();
 
    sendReqBuilder.setPaymentRequest(pay_req);
@@ -1000,6 +1000,63 @@
 
     }
    });
+
+  }
+
+
+  public static void SendPayment(final String pay_req, final long amount, final CallbackInterface callback) throws IOException {
+   SendRequest.Builder sendReqBuilder = SendRequest.newBuilder();
+
+   sendReqBuilder.setPaymentRequest(pay_req);
+
+   if (amount != -1) {
+    sendReqBuilder.setAmt(amount);
+   }
+
+
+   StreamObserver < SendRequest > stream = stub.sendPayment(new StreamObserver < SendResponse > () {
+    @Override
+    public void onNext(SendResponse response) {
+     try {
+
+      JSONObject json = new JSONObject();
+      json.put("error", false);
+      json.put("response", parseSendPayment(response));
+
+      callback.eventFired(json.toString());
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+       callback.eventFired("");
+      }
+     }
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
+
+    }
+   });
+
+   stream.onNext(sendReqBuilder.build());
+
 
   }
 
@@ -1109,6 +1166,108 @@
    });
 
   }
+
+  public static void SettleInvoice(final String preimage, final CallbackInterface callback) throws IOException {
+   SettleInvoiceMsg.Builder settleInvoiceMsg = SettleInvoiceMsg.newBuilder();
+   settleInvoiceMsg.setPreimage(ByteString.copyFrom(hexStringToByteArray(preimage)));
+
+   stubInvoices.settleInvoice(settleInvoiceMsg.build(), new StreamObserver < SettleInvoiceResp > () {
+    @Override
+    public void onNext(SettleInvoiceResp response) {
+
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", false);
+      json.put("response", "success");
+
+      callback.eventFired(json.toString());
+
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+       callback.eventFired("");
+      }
+     }
+
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
+
+    }
+   });
+
+
+  }
+
+
+  public static void CancelInvoice(final String hash, final CallbackInterface callback) throws IOException {
+   CancelInvoiceMsg.Builder cancelInvoiceMsg = CancelInvoiceMsg.newBuilder();
+   cancelInvoiceMsg.setPaymentHash(ByteString.copyFrom(hexStringToByteArray(hash)));
+
+   stubInvoices.cancelInvoice(cancelInvoiceMsg.build(), new StreamObserver < CancelInvoiceResp > () {
+    @Override
+    public void onNext(CancelInvoiceResp response) {
+
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", false);
+      json.put("response", "success");
+
+      callback.eventFired(json.toString());
+
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+       callback.eventFired("");
+      }
+     }
+
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
+
+    }
+   });
+
+
+  }
+
 
   public static void AddInvoice(final long amount, final long expiry, final String memo, final CallbackInterface callback) throws IOException {
    Invoice.Builder invoiceReq = Invoice.newBuilder();
@@ -1400,6 +1559,64 @@
    });
 
 
+
+  }
+
+
+  public static void SubscribeSingleInvoices(final String rhash, final CallbackInterface callback) throws IOException {
+
+   SubscribeSingleInvoiceRequest.Builder request = SubscribeSingleInvoiceRequest.newBuilder();
+   request.setRHash(ByteString.copyFrom(hexStringToByteArray(rhash)));
+
+   stubInvoices.subscribeSingleInvoice(request.build(), new StreamObserver < Invoice > () {
+    @Override
+    public void onNext(Invoice response) {
+
+     try {
+
+      JSONObject anInvoiceJSON = parseInvoice(response);
+
+      JSONObject json = new JSONObject();
+      json.put("error", false);
+      json.put("response", anInvoiceJSON);
+      callback.eventFired(json.toString());
+
+
+
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       System.out.println("error " + e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+
+       callback.eventFired(e2.toString());
+      }
+     }
+
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
+
+    }
+   });
 
   }
 
@@ -2775,6 +2992,6 @@
     return new JSONArray();
    }
   }
- 
+
 
  }
