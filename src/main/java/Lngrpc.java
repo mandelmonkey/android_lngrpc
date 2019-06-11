@@ -1285,6 +1285,7 @@
      try {
       JSONObject resJson = new JSONObject();
       resJson.put("payment_request", response.getPaymentRequest());
+      resJson.put("r_hash", bytesToHex(response.getRHash().toByteArray()));
 
       JSONObject json = new JSONObject();
       json.put("error", false);
@@ -1444,6 +1445,55 @@
 
   }
 
+  public static void LookupInvoice(final String rhash, final CallbackInterface callback) throws IOException {
+ 
+   PaymentHash.Builder req = PaymentHash.newBuilder();
+   req.setRHashStr(rhash);
+   stub.lookupInvoice(req.build(), new StreamObserver < Invoice > () {
+    @Override
+    public void onNext(Invoice response) {
+
+     try {
+
+
+      JSONObject json = new JSONObject();
+      json.put("error", false);
+      json.put("response", parseInvoice(response));
+
+      callback.eventFired(json.toString());
+
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+       callback.eventFired("");
+      }
+     }
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
+
+    }
+   });
+
+  }
 
 
   public static void GetNodeInfo(final String pubkey, final CallbackInterface callback) throws IOException {
@@ -1563,7 +1613,7 @@
   }
 
 
-  public static void SubscribeSingleInvoices(final String rhash, final CallbackInterface callback) throws IOException {
+  public static void SubscribeSingleInvoice(final String rhash, final CallbackInterface callback) throws IOException {
 
    SubscribeSingleInvoiceRequest.Builder request = SubscribeSingleInvoiceRequest.newBuilder();
    request.setRHash(ByteString.copyFrom(hexStringToByteArray(rhash)));
@@ -1875,6 +1925,14 @@
   public static byte[] makePendingChannelsRequest() throws IOException {
 
    return PendingChannelsRequest.getDefaultInstance().toByteArray();
+
+  }
+  
+  public static byte[] makeLookupInvoiceRequest(String rhash) throws IOException {
+
+   PaymentHash.Builder req = PaymentHash.newBuilder();
+   req.setRHashStr(rhash);
+   return req.build().toByteArray();
 
   }
 
@@ -2224,8 +2282,8 @@
 
     JSONObject resJson = new JSONObject();
     resJson.put("payment_request", response.getPaymentRequest());
-
-
+    resJson.put("r_hash", bytesToHex(response.getRHash().toByteArray()));
+     
     JSONObject json = new JSONObject();
     json.put("error", false);
     json.put("response", resJson);
@@ -2822,6 +2880,35 @@
   }
 
 
+   public static String parseLookupInvoiceResponse(String res) {
+
+   byte[] data = Base64.decodeBase64(res);
+   try {
+    Invoice response = Invoice.parseFrom(data);
+
+
+    JSONObject resJson = parseInvoice(response);
+    JSONObject json = new JSONObject();
+    json.put("error", false);
+    json.put("response", resJson);
+
+    return json.toString();
+
+
+   } catch (Exception e) {
+    try {
+     JSONObject json = new JSONObject();
+     json.put("error", true);
+     json.put("response", e.getLocalizedMessage());
+     return json.toString();
+    } catch (Exception e2) {
+     System.out.println(e2);
+     return "";
+    }
+
+   }
+
+  }
 
   public static String parseGetNodeInfoResponse(String res) {
 
