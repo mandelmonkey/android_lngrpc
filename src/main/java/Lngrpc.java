@@ -1390,13 +1390,14 @@
   }
 
 
-  public static void OpenChannel(final String pubKey, final long local_amount, final CallbackInterface callback) throws IOException {
+  public static void OpenChannel(final String pubKey, final long local_amount, boolean isPrivate, final CallbackInterface callback) throws IOException {
 
    OpenChannelRequest.Builder openChannelReq = OpenChannelRequest.newBuilder();
    openChannelReq.setNodePubkeyString(pubKey);
 
    openChannelReq.setNodePubkey(ByteString.copyFrom(hexStringToByteArray(pubKey)));
    openChannelReq.setLocalFundingAmount(local_amount);
+   openChannelReq.setPrivate(isPrivate);
 
    stub.openChannel(openChannelReq.build(), new StreamObserver < OpenStatusUpdate > () {
     @Override
@@ -2606,10 +2607,11 @@
    return ConnectPeerRequest.newBuilder().setAddr(lightningAddBuilder.build()).build().toByteArray();
   }
 
-  public static byte[] makeOpenChannelRequest(final String pubKey, final long local_amount) throws IOException {
+  public static byte[] makeOpenChannelRequest(final String pubKey, final long local_amount, boolean isPrivate) throws IOException {
 
    OpenChannelRequest.Builder openChannelReq = OpenChannelRequest.newBuilder();
    openChannelReq.setNodePubkeyString(pubKey);
+   openChannelReq.setPrivate(isPrivate); 
 
    openChannelReq.setNodePubkey(ByteString.copyFrom(hexStringToByteArray(pubKey)));
    openChannelReq.setLocalFundingAmount(local_amount);
