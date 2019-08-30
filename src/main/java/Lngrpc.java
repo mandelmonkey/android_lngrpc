@@ -1,5 +1,3 @@
- import android.os.Handler;
- import android.os.Looper;
  import com.google.protobuf.ByteString;
  import io.grpc.Attributes;
  import io.grpc.CallCredentials;
@@ -7,10 +5,6 @@
  import io.grpc.Metadata;
  import io.grpc.MethodDescriptor;
  import io.grpc.Status;
- import java.io.File;
- import io.grpc.netty.GrpcSslContexts;
- import io.grpc.netty.NettyChannelBuilder;
- import io.grpc.testing.TestUtils;
  import java.security.cert.X509Certificate;
  import java.security.cert.CertificateFactory;
  import java.io.ByteArrayInputStream;
@@ -20,12 +14,8 @@
  import javax.net.ssl.TrustManagerFactory;
  import javax.net.ssl.SSLContext;
  import javax.net.ssl.SSLSocketFactory;
- import io.grpc.okhttp.OkHttpChannelBuilder;
  import com.squareup.okhttp.ConnectionSpec;
  import com.squareup.okhttp.TlsVersion;
- import io.grpc.internal.GrpcUtil;
- import io.grpc.okhttp.internal.CipherSuite;
- import io.grpc.okhttp.NegotiationType;
  import io.grpc.okhttp.OkHttpChannelBuilder;
  import lnrpc.LightningGrpc;
  import lnrpc.LightningGrpc.LightningStub;
@@ -33,17 +23,12 @@
  import lnrpc.Rpc.GetInfoRequest;
  import lnrpc.Rpc.GetInfoResponse;
  import lnrpc.Rpc.*;
- import lnrpc.Rpc.*;
  import invoicesrpc.InvoicesGrpc;
  import invoicesrpc.InvoicesGrpc.InvoicesStub;
  import invoicesrpc.InvoicesOuterClass.*;
+ import io.grpc.okhttp.NegotiationType;
  import java.util.List;
- import java.io.File;
  import java.io.IOException;
- import java.nio.file.Files;
- import java.nio.file.Paths;
- import java.util.Arrays;
- import java.util.Iterator;
  import java.util.concurrent.Executor;
  import lnrpc.Rpc.AddressType;
  import lnrpc.Rpc.PendingChannelsResponse.ClosedChannel;
@@ -55,7 +40,9 @@
  import org.apache.commons.codec.binary.Hex;
  import org.json.JSONObject;
  import org.json.JSONArray;
-
+import wtclientrpc.Wtclient;
+import wtclientrpc.Wtclient.AddTowerRequest;
+import wtclientrpc.Wtclient.AddTowerResponse;
  public class Lngrpc {
 
   static class MacaroonCallCredential implements CallCredentials {
@@ -158,14 +145,20 @@
     @Override
     public void run() {
 
-
      try {
-      OkHttpChannelBuilder builder = OkHttpChannelBuilder.forAddress(host, port)
-       .connectionSpec(new ConnectionSpec.Builder(OkHttpChannelBuilder.DEFAULT_CONNECTION_SPEC)
-        .tlsVersions(ConnectionSpec.MODERN_TLS.tlsVersions().toArray(new TlsVersion[0]))
-        .build());
 
 
+      OkHttpChannelBuilder builder = null;
+      if (host.contains(".onion")) {
+       System.out.println("using http");
+       builder = OkHttpChannelBuilder.forAddress(host, port).usePlaintext();
+      } else {
+       System.out.println("using https");
+       builder = OkHttpChannelBuilder.forAddress(host, port)
+        .connectionSpec(new ConnectionSpec.Builder(OkHttpChannelBuilder.DEFAULT_CONNECTION_SPEC)
+         .tlsVersions(ConnectionSpec.MODERN_TLS.tlsVersions().toArray(new TlsVersion[0]))
+         .build());
+      }
 
       if (cert != null) {
        byte[] decoded = Base64.decodeBase64(cert);
@@ -238,6 +231,8 @@
     @Override
     public void onError(Throwable t) {
      try {
+      t.printStackTrace();
+
       JSONObject json = new JSONObject();
       json.put("error", true);
       json.put("response", t.getLocalizedMessage());
@@ -403,7 +398,7 @@
      JSONObject anInvoiceJSON = new JSONObject();
      anInvoiceJSON.put("creation_date", anInvoice.getCreationDate());
      anInvoiceJSON.put("memo", anInvoice.getMemo());
-     anInvoiceJSON.put("amt_paid", anInvoice.getAmtPaid()); //deprecated check api lnd
+     anInvoiceJSON.put("amt_paid_sat", anInvoice.getAmtPaidSat()); //deprecated check api lnd
      anInvoiceJSON.put("value", anInvoice.getValue()); //deprecated check api lnd
      anInvoiceJSON.put("payment_request", anInvoice.getPaymentRequest());
      anInvoiceJSON.put("settled", anInvoice.getSettled());
@@ -475,6 +470,7 @@
     resJson.put("testnet", response.getTestnet());
     resJson.put("synced_to_chain", response.getSyncedToChain());
     resJson.put("block_height", response.getBlockHeight());
+    resJson.put("block_hash", response.getBlockHash());
 
 
     try {
@@ -951,13 +947,20 @@
   }
 
 
-  public static void SendPaymentSync(final String pay_req, final long amount, final CallbackInterface callback) throws IOException {
+  public static void SendPaymentSync(final String pay_req, final long amount, final long feeLimit, final CallbackInterface callback) throws IOException {
+      
    SendRequest.Builder sendReqBuilder = SendRequest.newBuilder();
 
    sendReqBuilder.setPaymentRequest(pay_req);
 
    if (amount != -1) {
     sendReqBuilder.setAmt(amount);
+   }
+   
+   if(feeLimit != -1){
+      FeeLimit.Builder feeLimitObj = FeeLimit.newBuilder();
+      feeLimitObj.setPercent(feeLimit);
+      sendReqBuilder.setFeeLimit(feeLimitObj.build());
    }
 
    stub.sendPaymentSync(sendReqBuilder.build(), new StreamObserver < SendResponse > () {
@@ -1004,13 +1007,19 @@
   }
 
 
-  public static void SendPayment(final String pay_req, final long amount, final CallbackInterface callback) throws IOException {
+  public static void SendPayment(final String pay_req, final long amount, final long feeLimit, final CallbackInterface callback) throws IOException {
    SendRequest.Builder sendReqBuilder = SendRequest.newBuilder();
 
    sendReqBuilder.setPaymentRequest(pay_req);
 
    if (amount != -1) {
     sendReqBuilder.setAmt(amount);
+   }
+   
+   if(feeLimit != -1){
+      FeeLimit.Builder feeLimitObj = FeeLimit.newBuilder();
+      feeLimitObj.setPercent(feeLimit);
+      sendReqBuilder.setFeeLimit(feeLimitObj.build());
    }
 
 
@@ -1118,6 +1127,69 @@
     }
    });
   }
+  
+  public static void EstimateFee(final long amount, final String address, final int target_conf, final CallbackInterface callback) throws IOException {
+   EstimateFeeRequest.Builder estimateFeeBuilder = EstimateFeeRequest.newBuilder();
+   if (amount == -1) {
+
+    estimateFeeBuilder.putAddrToAmount(address, 100000); //set small amount if sending all as amount will be -1
+
+   } else {
+
+    estimateFeeBuilder.putAddrToAmount(address, amount);
+
+   }
+
+   estimateFeeBuilder.setTargetConf(target_conf);
+
+   stub.estimateFee(estimateFeeBuilder.build(), new StreamObserver < EstimateFeeResponse > () {
+    @Override
+    public void onNext(EstimateFeeResponse response) {
+     try {
+      JSONObject resJson = new JSONObject();
+      resJson.put("fee_sat", response.getFeeSat());
+      resJson.put("feerate_sat_per_byte", response.getFeerateSatPerByte());
+
+
+      JSONObject json = new JSONObject();
+      json.put("error", false);
+      json.put("response", resJson);
+
+      callback.eventFired(json.toString());
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+       callback.eventFired("");
+      }
+     }
+    }
+    
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
+
+    }
+   });
+  }
+  
+  
 
   public static void ConnectPeer(final String pubKey, final String host, final CallbackInterface callback) throws IOException {
    LightningAddress.Builder lightningAddBuilder = LightningAddress.newBuilder().setPubkey(pubKey);
@@ -1230,6 +1302,59 @@
       JSONObject json = new JSONObject();
       json.put("error", false);
       json.put("response", "success");
+
+      callback.eventFired(json.toString());
+
+     } catch (Exception e) {
+      try {
+       JSONObject json = new JSONObject();
+       json.put("error", true);
+       json.put("response", e.toString());
+
+       callback.eventFired(json.toString());
+      } catch (Exception e2) {
+       callback.eventFired("");
+      }
+     }
+
+    }
+    @Override
+    public void onError(Throwable t) {
+     try {
+      JSONObject json = new JSONObject();
+      json.put("error", true);
+      json.put("response", t.getLocalizedMessage());
+
+      callback.eventFired(json.toString());
+     } catch (Exception e2) {
+      callback.eventFired("");
+     }
+
+    }
+    @Override
+    public void onCompleted() {
+
+    }
+   });
+
+
+  }
+
+  public static void SignMessage(final String message, final CallbackInterface callback) throws IOException {
+   SignMessageRequest.Builder req = SignMessageRequest.newBuilder();
+
+   req.setMsg(ByteString.copyFromUtf8(message));
+   stub.signMessage(req.build(), new StreamObserver < SignMessageResponse > () {
+    @Override
+    public void onNext(SignMessageResponse response) {
+
+     try {
+      JSONObject resJson = new JSONObject();
+      resJson.put("signature", response.getSignature());
+
+      JSONObject json = new JSONObject();
+      json.put("error", false);
+      json.put("response", resJson);
 
       callback.eventFired(json.toString());
 
@@ -1447,7 +1572,7 @@
   }
 
   public static void LookupInvoice(final String rhash, final CallbackInterface callback) throws IOException {
- 
+
    PaymentHash.Builder req = PaymentHash.newBuilder();
    req.setRHashStr(rhash);
    stub.lookupInvoice(req.build(), new StreamObserver < Invoice > () {
@@ -1845,6 +1970,98 @@
    }
   }
 
+  public static byte[] makeSignMessageRequest(String message) throws IOException {
+
+   SignMessageRequest.Builder req = SignMessageRequest.newBuilder();
+
+   req.setMsg(ByteString.copyFromUtf8(message));
+
+   return req.build().toByteArray();
+
+  }
+
+
+  public static String parseSignMessageResponse(String res) {
+
+   byte[] data = Base64.decodeBase64(res);
+   try {
+    SignMessageResponse response = SignMessageResponse.parseFrom(data);
+
+    JSONObject jsonRes = new JSONObject();
+    jsonRes.put("signature", response.getSignature());
+
+
+    JSONObject json = new JSONObject();
+    json.put("error", false);
+    json.put("response", jsonRes);
+
+    return json.toString();
+
+
+
+   } catch (Exception e) {
+    try {
+     JSONObject json = new JSONObject();
+     json.put("error", true);
+     json.put("response", e.getLocalizedMessage());
+     return json.toString();
+    } catch (Exception e2) {
+     System.out.println(e2);
+     return "";
+    }
+
+   }
+
+  }
+
+
+  public static byte[] makeVerifyMessageRequest(String message, String signature) throws IOException {
+
+   VerifyMessageRequest.Builder req = VerifyMessageRequest.newBuilder();
+
+   req.setMsg(ByteString.copyFromUtf8(message));
+   req.setSignature(signature);
+
+   return req.build().toByteArray();
+
+  }
+
+
+  public static String parseVerifyMessageResponse(String res) {
+
+   byte[] data = Base64.decodeBase64(res);
+   try {
+    VerifyMessageResponse response = VerifyMessageResponse.parseFrom(data);
+
+    JSONObject jsonRes = new JSONObject();
+    jsonRes.put("pubkey", response.getPubkey());
+    jsonRes.put("valid", response.getValid());
+
+
+    JSONObject json = new JSONObject();
+    json.put("error", false);
+    json.put("response", jsonRes);
+
+    return json.toString();
+
+
+
+   } catch (Exception e) {
+    try {
+     JSONObject json = new JSONObject();
+     json.put("error", true);
+     json.put("response", e.getLocalizedMessage());
+     return json.toString();
+    } catch (Exception e2) {
+     System.out.println(e2);
+     return "";
+    }
+
+   }
+
+  }
+
+
   public static byte[] makeUnlockWalletRequest(String password) throws IOException {
 
    UnlockWalletRequest.Builder req = UnlockWalletRequest.newBuilder();
@@ -1875,6 +2092,7 @@
 
    req.setWalletPassword(passwordBS);
    if (recoveryWindow != -1) {
+    System.out.println("recovery window " + recoveryWindow);
     req.setRecoveryWindow(recoveryWindow);
    }
 
@@ -1928,7 +2146,7 @@
    return PendingChannelsRequest.getDefaultInstance().toByteArray();
 
   }
-  
+
   public static byte[] makeLookupInvoiceRequest(String rhash) throws IOException {
 
    PaymentHash.Builder req = PaymentHash.newBuilder();
@@ -2284,7 +2502,7 @@
     JSONObject resJson = new JSONObject();
     resJson.put("payment_request", response.getPaymentRequest());
     resJson.put("r_hash", bytesToHex(response.getRHash().toByteArray()));
-     
+
     JSONObject json = new JSONObject();
     json.put("error", false);
     json.put("response", resJson);
@@ -2487,6 +2705,35 @@
    }
 
   }
+  
+  public static String parseAddTowerResponse(String res) {
+
+
+   byte[] data = Base64.decodeBase64(res);
+   try {
+    AddTowerResponse response = AddTowerResponse.parseFrom(data);
+ 
+    JSONObject json = new JSONObject();
+    json.put("error", false);
+    json.put("response", response.toString());
+
+    return json.toString();
+
+
+   } catch (Exception e) {
+    try {
+     JSONObject json = new JSONObject();
+     json.put("error", true);
+     json.put("response", e.getLocalizedMessage());
+     return json.toString();
+    } catch (Exception e2) {
+     System.out.println(e2);
+     return "";
+    }
+
+   }
+  }
+  
   public static String parseConnectPeerResponse(String res) {
 
 
@@ -2553,6 +2800,26 @@
 
   }
 
+  public static byte[] makeEstimateFeeRequest(final long amount, final String address, final int target_conf) throws IOException {
+
+   EstimateFeeRequest.Builder estimateFeeBuilder = EstimateFeeRequest.newBuilder();
+   if (amount == -1) {
+
+    estimateFeeBuilder.putAddrToAmount(address, 100000); //set small amount if sending all as amount will be -1
+
+   } else {
+
+    estimateFeeBuilder.putAddrToAmount(address, amount);
+
+   }
+
+   estimateFeeBuilder.setTargetConf(target_conf);
+
+
+   return estimateFeeBuilder.build().toByteArray();
+
+  }
+
 
   public static byte[] makeSendCoinsRequest(final long amount, final String address, final long fee) throws IOException {
 
@@ -2565,7 +2832,7 @@
    }
 
    if (fee != -1) {
-    sendReqBuilder.setSatPerByte(fee);
+    sendReqBuilder.setSatPerByte(fee); 
    }
 
    return sendReqBuilder.build().toByteArray();
@@ -2573,7 +2840,7 @@
   }
 
 
-  public static byte[] makeSendPaymentRequest(final String pay_req, final long amount) throws IOException {
+  public static byte[] makeSendPaymentRequest(final String pay_req, final long amount, final long feeLimit) throws IOException {
 
    SendRequest.Builder sendReqBuilder = SendRequest.newBuilder();
 
@@ -2581,6 +2848,12 @@
 
    if (amount != -1) {
     sendReqBuilder.setAmt(amount);
+   }
+   
+   if(feeLimit != -1){
+       FeeLimit.Builder feeLimitObj = FeeLimit.newBuilder();
+       feeLimitObj.setPercent(feeLimit);
+        sendReqBuilder.setFeeLimit(feeLimitObj.build());
    }
 
    return sendReqBuilder.build().toByteArray();
@@ -2599,6 +2872,15 @@
    return req.build().toByteArray();
 
   }
+  
+   public static byte[] makeAddTowerRequest(final String pubKey, final String host) throws IOException {
+     
+     AddTowerRequest.Builder builder = AddTowerRequest.newBuilder();
+     builder.setPubkey(ByteString.copyFrom(hexStringToByteArray(pubKey)));
+     builder.setAddress(host);
+      
+     return  builder.build().toByteArray();
+  }
 
   public static byte[] makeConnectPeerRequest(final String pubKey, final String host) throws IOException {
 
@@ -2611,7 +2893,7 @@
 
    OpenChannelRequest.Builder openChannelReq = OpenChannelRequest.newBuilder();
    openChannelReq.setNodePubkeyString(pubKey);
-   openChannelReq.setPrivate(isPrivate); 
+   openChannelReq.setPrivate(isPrivate);
 
    openChannelReq.setNodePubkey(ByteString.copyFrom(hexStringToByteArray(pubKey)));
    openChannelReq.setLocalFundingAmount(local_amount);
@@ -2634,6 +2916,38 @@
    NewAddressRequest.Builder req = NewAddressRequest.newBuilder().setType(addressType);
 
    return req.build().toByteArray();
+  }
+
+
+  public static String parseEstimateFeeResponse(String res) {
+   byte[] data = Base64.decodeBase64(res);
+
+   try {
+    EstimateFeeResponse response = EstimateFeeResponse.parseFrom(data);
+    JSONObject resJson = new JSONObject();
+    resJson.put("fee_sat", response.getFeeSat());
+    resJson.put("feerate_sat_per_byte", response.getFeerateSatPerByte());
+
+    JSONObject json = new JSONObject();
+    json.put("error", false);
+    json.put("response", resJson);
+
+    return json.toString();
+
+
+
+   } catch (Exception e) {
+    try {
+     JSONObject json = new JSONObject();
+     json.put("error", true);
+     json.put("response", e.getLocalizedMessage());
+     return json.toString();
+    } catch (Exception e2) {
+     System.out.println(e2);
+     return "";
+    }
+
+   }
   }
 
   public static String parseSendCoinsResponse(String res) {
@@ -2669,6 +2983,8 @@
 
 
   }
+
+
 
   private static JSONObject parseSendPayment(SendResponse response) {
    try {
@@ -2882,7 +3198,7 @@
   }
 
 
-   public static String parseLookupInvoiceResponse(String res) {
+  public static String parseLookupInvoiceResponse(String res) {
 
    byte[] data = Base64.decodeBase64(res);
    try {
