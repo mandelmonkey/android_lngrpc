@@ -2062,13 +2062,17 @@ import wtclientrpc.Wtclient.AddTowerResponse;
   }
 
 
-  public static byte[] makeUnlockWalletRequest(String password) throws IOException {
+  public static byte[] makeUnlockWalletRequest(String password,  int recoveryWindow) throws IOException {
 
    UnlockWalletRequest.Builder req = UnlockWalletRequest.newBuilder();
    ByteString passwordBS = ByteString.copyFromUtf8(password);
 
    req.setWalletPassword(passwordBS);
-   //req.setRecoveryWindow(250);
+    if (recoveryWindow != -1) {
+        System.out.println("recovery window " + recoveryWindow);
+        req.setRecoveryWindow(recoveryWindow);
+    }
+
 
    return req.build().toByteArray();
 
