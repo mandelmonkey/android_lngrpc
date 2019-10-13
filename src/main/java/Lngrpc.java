@@ -2392,14 +2392,14 @@ import wtclientrpc.Wtclient.AddTowerResponse;
   }
 
 
-  public static byte[] makeAddInvoiceRequest(final long amount, final long expiry, final String memo) throws IOException {
+  public static byte[] makeAddInvoiceRequest(final long amount, final long expiry, final String memo, final Boolean isPrivate) throws IOException {
 
    Invoice.Builder invoiceReq = Invoice.newBuilder();
    invoiceReq.setValue(amount);
    if (memo != null) {
     invoiceReq.setMemo(memo);
    }
-
+   invoiceReq.setPrivate(isPrivate);
    invoiceReq.setExpiry(expiry);
 
    return invoiceReq.build().toByteArray();
